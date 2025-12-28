@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Edit Video</h2>
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">Title *</label>
+      <input name="title" class="form-control" value="{{item.title}}" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Director</label>
+      <input name="director" class="form-control" value="{{details.director if details else ''}}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Runtime (minutes)</label>
+      <input name="runtime_minutes" class="form-control" type="number" value="{{details.runtime_minutes if details else ''}}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Rating</label>
+      <input name="rating" class="form-control" value="{{details.rating if details else ''}}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Format</label>
+      <input name="format" class="form-control" value="{{details.format if details else ''}}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Genre</label>
+      <input name="genre" class="form-control" value="{{details.genre if details else ''}}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Year</label>
+      <input name="year" class="form-control" value="{{item.year or ''}}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Notes</label>
+      <textarea name="notes" class="form-control">{{item.notes or ''}}</textarea>
+    </div>
+    <button class="btn btn-primary">Save Changes</button>
+  </form>
+{% endblock %}

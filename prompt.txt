@@ -1,0 +1,185 @@
+PROJECT GOAL:  
+Build a Flask‑based web application for managing a family media catalog. The app must allow a non‑technical intern to easily add, edit, and view media items (books, audio, and video). The UI must be simple, clean, and form‑driven.
+1. Technology Requirements
+
+    Backend: Flask (Python)
+
+    Database: PostgreSQL (already created)
+
+    ORM/DB Access: psycopg2 or SQLAlchemy (your choice)
+
+    Frontend: HTML templates (Jinja2), Bootstrap for styling
+
+    Version control: Git + GitHub
+
+    Environment: Linux Mint, VS Code
+
+2. Database Schema (Already Created)
+media_item
+
+    id (PK, serial)
+
+    title (text, required)
+
+    media_type (text, required: 'book', 'audio', 'video')
+
+    year (int)
+
+    notes (text)
+
+    date_added (date, default current_date)
+
+book_details
+
+    id (PK, FK → media_item.id)
+
+    author (text)
+
+    isbn (text)
+
+    publisher (text)
+
+    page_count (int)
+
+    physical_description (text)
+
+    genre (text)
+
+audio_details
+
+    id (PK, FK → media_item.id)
+
+    artist (text)
+
+    album (text)
+
+    track_count (int)
+
+    format (text)
+
+    genre (text)
+
+video_details
+
+    id (PK, FK → media_item.id)
+
+    director (text)
+
+    runtime_minutes (int)
+
+    rating (text)
+
+    format (text)
+
+    genre (text)
+
+A unified view exists in the database, but the app should not depend on it.
+3. Application Features
+A. Add New Media
+
+Provide three separate forms:
+
+    Add Book
+
+    Add Audio
+
+    Add Video
+
+Each form must:
+
+    Insert into media_item
+
+    Capture the returned ID
+
+    Insert into the appropriate detail table
+
+    Validate required fields
+
+    Show a success message
+
+B. Edit Existing Media
+
+Provide an “Edit” page for each media type:
+
+    Load existing values from both media_item and the detail table
+
+    Display a form pre‑filled with current values
+
+    Allow updates to both tables
+
+    Save changes and show confirmation
+
+C. View Media
+
+Provide:
+
+    A list view of all media items (title, type, year)
+
+    A detail view for each item showing all fields
+
+    Optional: search bar (title, genre, media type)
+
+D. Navigation
+
+A simple Bootstrap navbar:
+
+    Home
+
+    Add Book
+
+    Add Audio
+
+    Add Video
+
+    View All Media
+
+4. Project Structure
+
+Use a standard Flask layout:
+project/
+│ app.py
+│ config.py
+│ requirements.txt
+│
+├── templates/
+│   ├── base.html
+│   ├── add_book.html
+│   ├── add_audio.html
+│   ├── add_video.html
+│   ├── edit_book.html
+│   ├── edit_audio.html
+│   ├── edit_video.html
+│   ├── list_media.html
+│   └── view_media.html
+│
+└── static/
+    ├── css/
+    └── js/
+
+5. Database Connection
+
+Create a reusable connection helper or SQLAlchemy model layer.
+Store credentials in config.py or environment variables.
+6. UX Requirements
+
+    Forms must be extremely simple and beginner‑friendly.
+
+    Use Bootstrap form components.
+
+    Use clear labels and placeholders.
+
+    Provide success/error messages.
+
+    Prevent SQL exposure or raw queries in the UI.
+
+    Validate required fields (title, media_type).
+
+7. Additional Requirements
+
+    Include comments explaining each route and function.
+
+    Ensure the app can run locally with flask run.
+
+    Provide instructions for setting up the virtual environment.
+
+    Provide instructions for pushing to GitHub.

@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Add Book</h2>
+  <form method="post">
+    <div class="mb-3">
+      <label class="form-label">Title *</label>
+      <input name="title" class="form-control" placeholder="Enter book title" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Author</label>
+      <input name="author" class="form-control" placeholder="Author name">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Year</label>
+      <input name="year" class="form-control" placeholder="Year (e.g., 2020)">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">ISBN</label>
+      <input name="isbn" class="form-control">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Publisher</label>
+      <input name="publisher" class="form-control">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Page Count</label>
+      <input name="page_count" class="form-control" type="number">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Genre</label>
+      <input name="genre" class="form-control">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Notes</label>
+      <textarea name="notes" class="form-control"></textarea>
+    </div>
+    <button class="btn btn-primary">Add Book</button>
+  </form>
+{% endblock %}

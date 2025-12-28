@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center">
+    <h2>All Media</h2>
+    <form class="d-flex" method="get" action="/media">
+      <input class="form-control me-2" name="q" placeholder="Search title or genre" value="{{q}}">
+      <button class="btn btn-outline-secondary">Search</button>
+    </form>
+  </div>
+
+  <table class="table table-striped mt-3">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Type</th>
+        <th>Year</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+        <tr>
+          <td>{{item.title}}</td>
+          <td>{{item.media_type}}</td>
+          <td>{{item.year or ''}}</td>
+          <td>
+            <a class="btn btn-sm btn-outline-primary" href="/media/{{item.id}}">View</a>
+            {% if item.media_type == 'book' %}
+              <a class="btn btn-sm btn-outline-secondary" href="/edit/book/{{item.id}}">Edit</a>
+            {% elif item.media_type == 'audio' %}
+              <a class="btn btn-sm btn-outline-secondary" href="/edit/audio/{{item.id}}">Edit</a>
+            {% elif item.media_type == 'video' %}
+              <a class="btn btn-sm btn-outline-secondary" href="/edit/video/{{item.id}}">Edit</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4">No items found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

@@ -1,0 +1,5 @@
+body { padding-bottom: 40px; }
+.container { max-width: 900px; }
+
+/* Simple spacing tweaks for beginner-friendly forms */
+label.form-label { font-weight: 600; }

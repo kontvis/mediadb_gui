@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>{{item.title}}</h2>
+  <p><strong>Type:</strong> {{item.media_type}} &nbsp; <strong>Year:</strong> {{item.year or ''}}</p>
+  <p><strong>Date Added:</strong> {{item.date_added}}</p>
+  <p><strong>Notes:</strong> {{item.notes or '—'}}</p>
+
+  {% if item.media_type == 'book' and item.book %}
+    <h4>Book Details</h4>
+    <p><strong>Author:</strong> {{item.book.author or '—'}}</p>
+    <p><strong>ISBN:</strong> {{item.book.isbn or '—'}}</p>
+    <p><strong>Publisher:</strong> {{item.book.publisher or '—'}}</p>
+    <p><strong>Page Count:</strong> {{item.book.page_count or '—'}}</p>
+    <p><strong>Physical Description:</strong> {{item.book.physical_description or '—'}}</p>
+    <p><strong>Genre:</strong> {{item.book.genre or '—'}}</p>
+    <a class="btn btn-secondary" href="/edit/book/{{item.id}}">Edit Book</a>
+  {% elif item.media_type == 'audio' and item.audio %}
+    <h4>Audio Details</h4>
+    <p><strong>Artist:</strong> {{item.audio.artist or '—'}}</p>
+    <p><strong>Album:</strong> {{item.audio.album or '—'}}</p>
+    <p><strong>Track Count:</strong> {{item.audio.track_count or '—'}}</p>
+    <p><strong>Format:</strong> {{item.audio.format or '—'}}</p>
+    <p><strong>Genre:</strong> {{item.audio.genre or '—'}}</p>
+    <a class="btn btn-secondary" href="/edit/audio/{{item.id}}">Edit Audio</a>
+  {% elif item.media_type == 'video' and item.video %}
+    <h4>Video Details</h4>
+    <p><strong>Director:</strong> {{item.video.director or '—'}}</p>
+    <p><strong>Runtime (min):</strong> {{item.video.runtime_minutes or '—'}}</p>
+    <p><strong>Rating:</strong> {{item.video.rating or '—'}}</p>
+    <p><strong>Format:</strong> {{item.video.format or '—'}}</p>
+    <p><strong>Genre:</strong> {{item.video.genre or '—'}}</p>
+    <a class="btn btn-secondary" href="/edit/video/{{item.id}}">Edit Video</a>
+  {% endif %}
+
+  <a class="btn btn-link mt-3" href="/media">Back to list</a>
+{% endblock %}
