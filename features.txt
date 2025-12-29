@@ -3,3 +3,14 @@ The All Media screen needs to show Title, Type, Genre, and Year.
 The All Media screen should be sortable by Title, Type, Genre, or Year. 
 The search on the All Media screen should allow the user to search by Title, Type or Genre
 
+v1.1
+The user shall be able to upload a csv to add new items to the catalog. 
+An upload csv button will appear in the upper right corner of the view_media page.
+The csv template that they use will include these columns:
+title,media_type,year,notes,author,isbn,publisher,page_count,physical_description,book_genre,artist,album,track_count,audio_format,audio_genre,director,runtime_minutes,rating,video_format,video_genre
+
+Only title and media_type are required.  
+When the template is loaded, an id will be generated for each item, and the date_added 
+field will be populated with the date of the upload. 
+
+
