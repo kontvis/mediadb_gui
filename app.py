@@ -73,21 +73,38 @@ def index():
 
 @app.route('/media')
 def list_media():
-    """List all media items. Optional query param `q` searches title and genre."""
+    """List all media items with search and sort. Query params: q (search), sort_by (title, type, year, genre)."""
     q = request.args.get('q', '').strip()
-    items = MediaItem.query.order_by(MediaItem.date_added.desc())
+    sort_by = request.args.get('sort_by', 'date').strip()
+    
+    items = MediaItem.query
+    
+    # Search filter: title, media_type, or genre
     if q:
         like = f"%{q}%"
         items = items.filter(
             db.or_(
                 MediaItem.title.ilike(like),
+                MediaItem.media_type.ilike(like),
                 MediaItem.book.has(BookDetails.genre.ilike(like)),
                 MediaItem.audio.has(AudioDetails.genre.ilike(like)),
                 MediaItem.video.has(VideoDetails.genre.ilike(like)),
             )
         )
+    
+    # Sorting
+    if sort_by == 'title':
+        items = items.order_by(MediaItem.title.asc())
+    elif sort_by == 'type':
+        items = items.order_by(MediaItem.media_type.asc())
+    elif sort_by == 'year':
+        items = items.order_by(MediaItem.year.desc())
+    else:
+        # Default: by date added (newest first)
+        items = items.order_by(MediaItem.date_added.desc())
+    
     items = items.all()
-    return render_template('list_media.html', items=items, q=q)
+    return render_template('list_media.html', items=items, q=q, sort_by=sort_by)
 
 
 @app.route('/media/<int:item_id>')

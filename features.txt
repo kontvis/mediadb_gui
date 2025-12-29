@@ -1,0 +1,5 @@
+v1.0
+The All Media screen needs to show Title, Type, Genre, and Year.
+The All Media screen should be sortable by Title, Type, Genre, or Year. 
+The search on the All Media screen should allow the user to search by Title, Type or Genre
+

@@ -1,18 +1,29 @@
 {% extends 'base.html' %}
 {% block content %}
-  <div class="d-flex justify-content-between align-items-center">
+  <div class="d-flex justify-content-between align-items-center mb-3">
     <h2>All Media</h2>
     <form class="d-flex" method="get" action="/media">
-      <input class="form-control me-2" name="q" placeholder="Search title or genre" value="{{q}}">
+      <input class="form-control me-2" name="q" placeholder="Search title, type or genre" value="{{q}}">
       <button class="btn btn-outline-secondary">Search</button>
     </form>
   </div>
 
-  <table class="table table-striped mt-3">
+  <div class="mb-3">
+    <label class="form-label">Sort by:</label>
+    <div class="btn-group" role="group">
+      <a href="/media?q={{q}}&sort_by=date" class="btn btn-sm {% if sort_by == 'date' or sort_by == '' %}btn-primary{% else %}btn-outline-primary{% endif %}">Date Added</a>
+      <a href="/media?q={{q}}&sort_by=title" class="btn btn-sm {% if sort_by == 'title' %}btn-primary{% else %}btn-outline-primary{% endif %}">Title</a>
+      <a href="/media?q={{q}}&sort_by=type" class="btn btn-sm {% if sort_by == 'type' %}btn-primary{% else %}btn-outline-primary{% endif %}">Type</a>
+      <a href="/media?q={{q}}&sort_by=year" class="btn btn-sm {% if sort_by == 'year' %}btn-primary{% else %}btn-outline-primary{% endif %}">Year</a>
+    </div>
+  </div>
+
+  <table class="table table-striped">
     <thead>
       <tr>
         <th>Title</th>
         <th>Type</th>
+        <th>Genre</th>
         <th>Year</th>
         <th></th>
       </tr>
@@ -22,6 +33,17 @@
         <tr>
           <td>{{item.title}}</td>
           <td>{{item.media_type}}</td>
+          <td>
+            {% if item.media_type == 'book' and item.book %}
+              {{item.book.genre or '—'}}
+            {% elif item.media_type == 'audio' and item.audio %}
+              {{item.audio.genre or '—'}}
+            {% elif item.media_type == 'video' and item.video %}
+              {{item.video.genre or '—'}}
+            {% else %}
+              —
+            {% endif %}
+          </td>
           <td>{{item.year or ''}}</td>
           <td>
             <a class="btn btn-sm btn-outline-primary" href="/media/{{item.id}}">View</a>
@@ -35,7 +57,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="4">No items found.</td></tr>
+        <tr><td colspan="5">No items found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
