@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from datetime import date
 import os
+import csv
+import io
 from config import Config
 
 # Initialize Flask app and configuration
@@ -306,6 +308,95 @@ def edit_video(item_id):
         return redirect(url_for('view_media', item_id=item.id))
 
     return render_template('edit_video.html', item=item, details=details)
+
+
+# --- CSV Upload ---
+@app.route('/upload-csv', methods=['GET', 'POST'])
+def upload_csv():
+    """Upload a CSV file to bulk add media items."""
+    if request.method == 'POST':
+        if 'csv_file' not in request.files:
+            flash('No file selected.', 'danger')
+            return redirect(url_for('upload_csv'))
+        
+        file = request.files['csv_file']
+        if file.filename == '':
+            flash('No file selected.', 'danger')
+            return redirect(url_for('upload_csv'))
+        
+        if not file.filename.endswith('.csv'):
+            flash('File must be a CSV.', 'danger')
+            return redirect(url_for('upload_csv'))
+        
+        try:
+            stream = io.StringIO(file.read().decode('utf-8'), newline=None)
+            reader = csv.DictReader(stream)
+            
+            added_count = 0
+            for row in reader:
+                title = row.get('title', '').strip()
+                media_type = row.get('media_type', '').strip()
+                
+                # Only title and media_type are required
+                if not title or not media_type:
+                    continue
+                
+                # Create media_item
+                item = MediaItem(
+                    title=title,
+                    media_type=media_type,
+                    year=int(row.get('year')) if row.get('year') else None,
+                    notes=row.get('notes', '').strip() or None,
+                    date_added=date.today()
+                )
+                db.session.add(item)
+                db.session.flush()  # Get the ID without committing yet
+                
+                # Create type-specific details
+                if media_type.lower() == 'book':
+                    details = BookDetails(
+                        id=item.id,
+                        author=row.get('author', '').strip() or None,
+                        isbn=row.get('isbn', '').strip() or None,
+                        publisher=row.get('publisher', '').strip() or None,
+                        page_count=int(row.get('page_count')) if row.get('page_count') else None,
+                        physical_description=row.get('physical_description', '').strip() or None,
+                        genre=row.get('book_genre', '').strip() or None,
+                    )
+                    db.session.add(details)
+                elif media_type.lower() == 'audio':
+                    details = AudioDetails(
+                        id=item.id,
+                        artist=row.get('artist', '').strip() or None,
+                        album=row.get('album', '').strip() or None,
+                        track_count=int(row.get('track_count')) if row.get('track_count') else None,
+                        format=row.get('audio_format', '').strip() or None,
+                        genre=row.get('audio_genre', '').strip() or None,
+                    )
+                    db.session.add(details)
+                elif media_type.lower() == 'video':
+                    details = VideoDetails(
+                        id=item.id,
+                        director=row.get('director', '').strip() or None,
+                        runtime_minutes=int(row.get('runtime_minutes')) if row.get('runtime_minutes') else None,
+                        rating=row.get('rating', '').strip() or None,
+                        format=row.get('video_format', '').strip() or None,
+                        genre=row.get('video_genre', '').strip() or None,
+                    )
+                    db.session.add(details)
+                
+                added_count += 1
+            
+            db.session.commit()
+            flash(f'{added_count} item(s) added successfully.', 'success')
+            return redirect(url_for('list_media'))
+        
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error processing CSV: {str(e)}', 'danger')
+            return redirect(url_for('upload_csv'))
+    
+    return render_template('upload_csv.html')
 
 
 if __name__ == '__main__':

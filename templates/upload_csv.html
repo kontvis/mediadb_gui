@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Upload Media CSV</h2>
+  <p>Upload a CSV file to bulk add media items to the catalog.</p>
+
+  <h4>CSV Format</h4>
+  <p>Your CSV should have the following columns:</p>
+  <pre>title,media_type,year,notes,author,isbn,publisher,page_count,physical_description,book_genre,artist,album,track_count,audio_format,audio_genre,director,runtime_minutes,rating,video_format,video_genre</pre>
+
+  <p><strong>Required fields:</strong> title, media_type</p>
+  <p><strong>Note:</strong> media_type should be one of: book, audio, or video. Only include the relevant columns for your media types.</p>
+
+  <h4>Example CSV Row (Book)</h4>
+  <pre>The Great Gatsby,book,1925,,F. Scott Fitzgerald,9780743273565,Scribner,180,Hardcover,Classic Literature,,,,,,,,</pre>
+
+  <h4>Upload File</h4>
+  <form method="post" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label class="form-label">Select CSV File</label>
+      <input type="file" name="csv_file" class="form-control" accept=".csv" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Upload</button>
+    <a href="/media" class="btn btn-secondary">Cancel</a>
+  </form>
+{% endblock %}
