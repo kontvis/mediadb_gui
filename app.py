@@ -103,6 +103,13 @@ def list_media():
         items = items.order_by(MediaItem.media_type.asc() if is_asc else MediaItem.media_type.desc())
     elif sort_by == 'year':
         items = items.order_by(MediaItem.year.asc() if is_asc else MediaItem.year.desc())
+    elif sort_by == 'genre':
+        # Sort by coalesced genre from the three detail tables
+        items = items.outerjoin(BookDetails, BookDetails.id == MediaItem.id)
+        items = items.outerjoin(AudioDetails, AudioDetails.id == MediaItem.id)
+        items = items.outerjoin(VideoDetails, VideoDetails.id == MediaItem.id)
+        genre_coalesce = db.func.coalesce(BookDetails.genre, AudioDetails.genre, VideoDetails.genre)
+        items = items.order_by(genre_coalesce.asc() if is_asc else genre_coalesce.desc())
     else:  # default: date_added
         items = items.order_by(MediaItem.date_added.asc() if is_asc else MediaItem.date_added.desc())
     

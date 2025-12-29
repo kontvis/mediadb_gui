@@ -3,3 +3,16 @@ body { padding-bottom: 40px; }
 
 /* Simple spacing tweaks for beginner-friendly forms */
 label.form-label { font-weight: 600; }
+
+/* Mobile / touch improvements */
+.btn, .form-select, .form-control {
+	min-height: 44px;
+}
+
+@media (max-width: 576px) {
+	.btn { width: 100%; }
+	.form-control, .form-select { font-size: 1.05rem; }
+	.card { margin-bottom: 0.75rem; }
+}
+
+.table-responsive { overflow-x: auto; }
