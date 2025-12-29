@@ -73,9 +73,10 @@ def index():
 
 @app.route('/media')
 def list_media():
-    """List all media items with search and sort. Query params: q (search), sort_by (title, type, year, genre)."""
+    """List all media items with search and sort. Query params: q (search), sort_by (column), sort_dir (asc/desc)."""
     q = request.args.get('q', '').strip()
-    sort_by = request.args.get('sort_by', 'date').strip()
+    sort_by = request.args.get('sort_by', 'date_added').strip()
+    sort_dir = request.args.get('sort_dir', 'desc').strip()
     
     items = MediaItem.query
     
@@ -93,18 +94,18 @@ def list_media():
         )
     
     # Sorting
+    is_asc = sort_dir == 'asc'
     if sort_by == 'title':
-        items = items.order_by(MediaItem.title.asc())
+        items = items.order_by(MediaItem.title.asc() if is_asc else MediaItem.title.desc())
     elif sort_by == 'type':
-        items = items.order_by(MediaItem.media_type.asc())
+        items = items.order_by(MediaItem.media_type.asc() if is_asc else MediaItem.media_type.desc())
     elif sort_by == 'year':
-        items = items.order_by(MediaItem.year.desc())
-    else:
-        # Default: by date added (newest first)
-        items = items.order_by(MediaItem.date_added.desc())
+        items = items.order_by(MediaItem.year.asc() if is_asc else MediaItem.year.desc())
+    else:  # default: date_added
+        items = items.order_by(MediaItem.date_added.asc() if is_asc else MediaItem.date_added.desc())
     
     items = items.all()
-    return render_template('list_media.html', items=items, q=q, sort_by=sort_by)
+    return render_template('list_media.html', items=items, q=q, sort_by=sort_by, sort_dir=sort_dir)
 
 
 @app.route('/media/<int:item_id>')

@@ -8,23 +8,25 @@
     </form>
   </div>
 
-  <div class="mb-3">
-    <label class="form-label">Sort by:</label>
-    <div class="btn-group" role="group">
-      <a href="/media?q={{q}}&sort_by=date" class="btn btn-sm {% if sort_by == 'date' or sort_by == '' %}btn-primary{% else %}btn-outline-primary{% endif %}">Date Added</a>
-      <a href="/media?q={{q}}&sort_by=title" class="btn btn-sm {% if sort_by == 'title' %}btn-primary{% else %}btn-outline-primary{% endif %}">Title</a>
-      <a href="/media?q={{q}}&sort_by=type" class="btn btn-sm {% if sort_by == 'type' %}btn-primary{% else %}btn-outline-primary{% endif %}">Type</a>
-      <a href="/media?q={{q}}&sort_by=year" class="btn btn-sm {% if sort_by == 'year' %}btn-primary{% else %}btn-outline-primary{% endif %}">Year</a>
-    </div>
-  </div>
+  {% macro sort_link(col_name, col_label) %}
+    {% if sort_by == col_name %}
+      {% set next_dir = 'asc' if sort_dir == 'desc' else 'desc' %}
+      {% set indicator = ' ↓' if sort_dir == 'desc' else ' ↑' %}
+    {% else %}
+      {% set next_dir = 'asc' %}
+      {% set indicator = '' %}
+    {% endif %}
+    <a href="/media?q={{q}}&sort_by={{col_name}}&sort_dir={{next_dir}}" class="text-decoration-none">{{col_label}}{{indicator}}</a>
+  {% endmacro %}
 
   <table class="table table-striped">
     <thead>
-      <tr>
-        <th>Title</th>
-        <th>Type</th>
-        <th>Genre</th>
-        <th>Year</th>
+      <tr style="cursor: pointer;">
+        <th>{{ sort_link('title', 'Title') }}</th>
+        <th>{{ sort_link('type', 'Type') }}</th>
+        <th>{{ sort_link('genre', 'Genre') }}</th>
+        <th>{{ sort_link('year', 'Year') }}</th>
+        <th>{{ sort_link('date_added', 'Date Added') }}</th>
         <th></th>
       </tr>
     </thead>
@@ -45,6 +47,7 @@
             {% endif %}
           </td>
           <td>{{item.year or ''}}</td>
+          <td>{{item.date_added}}</td>
           <td>
             <a class="btn btn-sm btn-outline-primary" href="/media/{{item.id}}">View</a>
             {% if item.media_type == 'book' %}
@@ -57,7 +60,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="5">No items found.</td></tr>
+        <tr><td colspan="6">No items found.</td></tr>
       {% endfor %}
     </tbody>
   </table>
