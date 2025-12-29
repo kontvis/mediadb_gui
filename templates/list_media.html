@@ -22,23 +22,88 @@
     <a href="/media?q={{q}}&sort_by={{col_name}}&sort_dir={{next_dir}}" class="text-decoration-none">{{col_label}}{{indicator}}</a>
   {% endmacro %}
 
-  <table class="table table-striped">
-    <thead>
-      <tr style="cursor: pointer;">
-        <th>{{ sort_link('title', 'Title') }}</th>
-        <th>{{ sort_link('type', 'Type') }}</th>
-        <th>{{ sort_link('genre', 'Genre') }}</th>
-        <th>{{ sort_link('year', 'Year') }}</th>
-        <th>{{ sort_link('date_added', 'Date Added') }}</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in items %}
-        <tr>
-          <td>{{item.title}}</td>
-          <td>{{item.media_type}}</td>
-          <td>
+  <!-- Small-screen sort controls -->
+  <form method="get" action="/media" class="d-block d-sm-none mb-2">
+    <input type="hidden" name="q" value="{{q}}">
+    <div class="row g-2">
+      <div class="col-7">
+        <select name="sort_by" class="form-select form-select-sm">
+          <option value="date_added" {% if sort_by == 'date_added' %}selected{% endif %}>Date Added</option>
+          <option value="title" {% if sort_by == 'title' %}selected{% endif %}>Title</option>
+          <option value="type" {% if sort_by == 'type' %}selected{% endif %}>Type</option>
+          <option value="genre" {% if sort_by == 'genre' %}selected{% endif %}>Genre</option>
+          <option value="year" {% if sort_by == 'year' %}selected{% endif %}>Year</option>
+        </select>
+      </div>
+      <div class="col-3">
+        <select name="sort_dir" class="form-select form-select-sm">
+          <option value="asc" {% if sort_dir == 'asc' %}selected{% endif %}>Asc</option>
+          <option value="desc" {% if sort_dir == 'desc' %}selected{% endif %}>Desc</option>
+        </select>
+      </div>
+      <div class="col-2">
+        <button class="btn btn-sm btn-primary w-100">Go</button>
+      </div>
+    </div>
+  </form>
+
+  <div class="table-responsive d-none d-sm-block">
+    <table class="table table-striped">
+      <thead>
+        <tr style="cursor: pointer;">
+          <th>{{ sort_link('title', 'Title') }}</th>
+          <th>{{ sort_link('type', 'Type') }}</th>
+          <th class="d-none d-sm-table-cell">{{ sort_link('genre', 'Genre') }}</th>
+          <th>{{ sort_link('year', 'Year') }}</th>
+          <th class="d-none d-sm-table-cell">{{ sort_link('date_added', 'Date Added') }}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+          <tr>
+            <td>{{item.title}}</td>
+            <td>{{item.media_type}}</td>
+            <td class="d-none d-sm-table-cell">
+              {% if item.media_type == 'book' and item.book %}
+                {{item.book.genre or '—'}}
+              {% elif item.media_type == 'audio' and item.audio %}
+                {{item.audio.genre or '—'}}
+              {% elif item.media_type == 'video' and item.video %}
+                {{item.video.genre or '—'}}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>{{item.year or ''}}</td>
+            <td class="d-none d-sm-table-cell">{{item.date_added}}</td>
+            <td>
+              <a class="btn btn-sm btn-outline-primary" href="/media/{{item.id}}">View</a>
+              {% if item.media_type == 'book' %}
+                <a class="btn btn-sm btn-outline-secondary" href="/edit/book/{{item.id}}">Edit</a>
+              {% elif item.media_type == 'audio' %}
+                <a class="btn btn-sm btn-outline-secondary" href="/edit/audio/{{item.id}}">Edit</a>
+              {% elif item.media_type == 'video' %}
+                <a class="btn btn-sm btn-outline-secondary" href="/edit/video/{{item.id}}">Edit</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">No items found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Small-screen stacked cards -->
+  <div class="d-block d-sm-none">
+    {% for item in items %}
+      <div class="card mb-2">
+        <div class="card-body">
+          <h5 class="card-title">{{item.title}}</h5>
+          <h6 class="card-subtitle mb-2 text-muted">{{item.media_type}} — {{item.year or '—'}}</h6>
+          <p class="card-text">
+            <strong>Genre:</strong>
             {% if item.media_type == 'book' and item.book %}
               {{item.book.genre or '—'}}
             {% elif item.media_type == 'audio' and item.audio %}
@@ -48,23 +113,20 @@
             {% else %}
               —
             {% endif %}
-          </td>
-          <td>{{item.year or ''}}</td>
-          <td>{{item.date_added}}</td>
-          <td>
-            <a class="btn btn-sm btn-outline-primary" href="/media/{{item.id}}">View</a>
-            {% if item.media_type == 'book' %}
-              <a class="btn btn-sm btn-outline-secondary" href="/edit/book/{{item.id}}">Edit</a>
-            {% elif item.media_type == 'audio' %}
-              <a class="btn btn-sm btn-outline-secondary" href="/edit/audio/{{item.id}}">Edit</a>
-            {% elif item.media_type == 'video' %}
-              <a class="btn btn-sm btn-outline-secondary" href="/edit/video/{{item.id}}">Edit</a>
-            {% endif %}
-          </td>
-        </tr>
-      {% else %}
-        <tr><td colspan="6">No items found.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+          </p>
+          <p class="card-text"><small class="text-muted">Added: {{item.date_added}}</small></p>
+          <a class="btn btn-sm btn-primary d-block mb-1" href="/media/{{item.id}}">View</a>
+          {% if item.media_type == 'book' %}
+            <a class="btn btn-sm btn-secondary d-block" href="/edit/book/{{item.id}}">Edit</a>
+          {% elif item.media_type == 'audio' %}
+            <a class="btn btn-sm btn-secondary d-block" href="/edit/audio/{{item.id}}">Edit</a>
+          {% elif item.media_type == 'video' %}
+            <a class="btn btn-sm btn-secondary d-block" href="/edit/video/{{item.id}}">Edit</a>
+          {% endif %}
+        </div>
+      </div>
+    {% else %}
+      <p>No items found.</p>
+    {% endfor %}
+  </div>
 {% endblock %}
