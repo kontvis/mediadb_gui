@@ -4,6 +4,8 @@ from datetime import date
 import os
 import csv
 import io
+import requests
+import json
 from config import Config
 
 # Initialize Flask app and configuration
@@ -123,6 +125,165 @@ def view_media(item_id):
     item = MediaItem.query.get_or_404(item_id)
     return render_template('view_media.html', item=item)
 
+
+# --- Barcode lookup helpers ---
+def lookup_isbn(isbn):
+    """Try Google Books then OpenLibrary for ISBN metadata."""
+    result = {}
+    # Google Books
+    try:
+        gb_url = f'https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}'
+        r = requests.get(gb_url, timeout=5)
+        if r.ok:
+            data = r.json()
+            if data.get('totalItems', 0) > 0:
+                vol = data['items'][0]['volumeInfo']
+                result.update({
+                    'title': vol.get('title'),
+                    'author': ', '.join(vol.get('authors', [])) if vol.get('authors') else None,
+                    'publisher': vol.get('publisher'),
+                    'year': vol.get('publishedDate', '')[:4] if vol.get('publishedDate') else None,
+                    'isbn': isbn,
+                })
+                return result
+    except Exception:
+        pass
+
+    # OpenLibrary
+    try:
+        ol_url = f'https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data'
+        r = requests.get(ol_url, timeout=5)
+        if r.ok:
+            data = r.json()
+            key = f'ISBN:{isbn}'
+            if key in data:
+                item = data[key]
+                result.update({
+                    'title': item.get('title'),
+                    'author': ', '.join([a.get('name') for a in item.get('authors', [])]) if item.get('authors') else None,
+                    'publisher': item.get('publishers')[0].get('name') if item.get('publishers') else None,
+                    'year': item.get('publish_date', '')[:4] if item.get('publish_date') else None,
+                    'isbn': isbn,
+                })
+                return result
+    except Exception:
+        pass
+
+    return None
+
+
+def lookup_upc_musicbrainz(upc):
+    """Lookup UPC via MusicBrainz (release search). Returns artist/title/year if found."""
+    try:
+        url = f'https://musicbrainz.org/ws/2/release/?query=barcode:{upc}&fmt=json'
+        r = requests.get(url, headers={'User-Agent': 'dbgui/1.0 (email@example.com)'}, timeout=5)
+        if r.ok:
+            data = r.json()
+            if data.get('releases'):
+                rel = data['releases'][0]
+                title = rel.get('title')
+                artist = None
+                if rel.get('artist-credit'):
+                    artist = ', '.join([a.get('name') for a in rel.get('artist-credit') if a.get('name')])
+                year = rel.get('date', '')[:4] if rel.get('date') else None
+                return {'title': title, 'artist': artist, 'year': year, 'upc': upc}
+    except Exception:
+        pass
+    return None
+
+
+def lookup_upc_tmdb(upc):
+    """Lookup UPC for video via TMDB if API key provided. Returns basic metadata."""
+    tmdb_key = os.environ.get('TMDB_API_KEY')
+    if not tmdb_key:
+        return None
+    try:
+        url = f'https://api.themoviedb.org/3/search/movie?api_key={tmdb_key}&query={upc}'
+        r = requests.get(url, timeout=5)
+        if r.ok:
+            data = r.json()
+            if data.get('results'):
+                mv = data['results'][0]
+                return {'title': mv.get('title'), 'year': mv.get('release_date', '')[:4] if mv.get('release_date') else None, 'upc': upc}
+    except Exception:
+        pass
+    return None
+
+
+def detect_and_lookup(barcode):
+    """Detect barcode type simply by length/prefix then use appropriate lookup functions."""
+    bc = barcode.strip()
+    # Heuristic: ISBN-10 (10) or ISBN-13 (13)
+    if len(bc) in (10, 13):
+        res = lookup_isbn(bc)
+        if res:
+            res['detected_type'] = 'isbn'
+            res['media_type'] = 'book'
+            return res
+
+    # UPC/EAN typically 12 or 13 digits
+    if len(bc) in (12, 13):
+        # try musicbrainz
+        res = lookup_upc_musicbrainz(bc)
+        if res:
+            res['detected_type'] = 'upc'
+            res['media_type'] = 'audio'
+            return res
+        # try tmdb
+        res = lookup_upc_tmdb(bc)
+        if res:
+            res['detected_type'] = 'upc'
+            res['media_type'] = 'video'
+            return res
+
+    return None
+
+
+@app.route('/scan')
+def scan_ui():
+    """Render barcode scanning UI."""
+    return render_template('scan.html')
+
+
+@app.route('/lookup_barcode', methods=['POST'])
+def lookup_barcode():
+    """API endpoint: accepts JSON { barcode: '...' } and returns metadata JSON."""
+    data = request.get_json(force=True)
+    barcode = data.get('barcode') if data else None
+    if not barcode:
+        return ({'error': 'barcode required'}, 400)
+
+    try:
+        meta = detect_and_lookup(barcode)
+        if not meta:
+            return ({'error': 'No metadata found for barcode', 'barcode': barcode}, 404)
+        # Normalize response fields to form-compatible keys
+        response = {
+            'barcode': barcode,
+            'media_type': meta.get('media_type'),
+            'title': meta.get('title'),
+            'year': meta.get('year'),
+            'notes': None,
+            'author': meta.get('author') or meta.get('artist'),
+            'isbn': meta.get('isbn'),
+            'publisher': meta.get('publisher'),
+            'page_count': None,
+            'physical_description': None,
+            'book_genre': meta.get('genre') if meta.get('media_type') == 'book' else None,
+            'artist': meta.get('artist') if meta.get('media_type') == 'audio' else None,
+            'album': None,
+            'track_count': None,
+            'audio_format': None,
+            'audio_genre': None,
+            'director': meta.get('director') if meta.get('media_type') == 'video' else None,
+            'runtime_minutes': None,
+            'rating': None,
+            'video_format': None,
+            'video_genre': None,
+        }
+        return (response, 200)
+    except Exception as e:
+        return ({'error': f'Lookup error: {str(e)}'}, 500)
 
 # --- Add forms ---
 @app.route('/add/book', methods=['GET', 'POST'])

@@ -13,4 +13,59 @@ Only title and media_type are required.
 When the template is loaded, an id will be generated for each item, and the date_added 
 field will be populated with the date of the upload. 
 
+v1.1.2
+Mobile enhancements:
+Responsive layout: Use Bootstrap grid and container/row/col-* so pages reflow; keep the <meta name="viewport"> (already present).
+Responsive table: Wrap tables in <div class="table-responsive"> and hide low-value columns on small screens with classes like d-none d-sm-table-cell for Genre/Year. Provide an alternate stacked card list for xs screens.
+Sortable headers (mobile): Keep header taps, but also provide a compact sort UI (small toolbar or select) for very small screens.
+Form UX: Use single-column forms, larger touch targets, input types (tel, number, date) and autocomplete attributes; increase button padding (btn-lg or CSS).
+File uploads on mobile: Keep the file input but ensure accept=".csv" and large tappable label; test on iOS/Android (they route to files/camera/gallery differently).
+Performance: Serve minified CSS, enable gzip, use CDN for Bootstrap (already used), lazy-load heavy assets, and keep HTML payload small.
+Accessibility & touch: Ensure 44–48px minimum tappable targets, clear contrast, and large form labels/placeholders for non‑technical users.
+Progressive improvements: Optionally add a responsive list view, small-screen CSS tweaks in style.css, and a simple service-worker or caching headers for offline-readiness.
 
+v2.0
+new feature set:
+
+### 1. Barcode Scanning (Client-Side)
+- Add a page or modal that allows the user to scan a barcode using their device camera.
+- Use an open-source JavaScript library such as ZXing or QuaggaJS.
+- The scanner should return the barcode value (ISBN, UPC, or EAN).
+
+### 2. Metadata Lookup (Server-Side)
+Based on the scanned barcode:
+- If the barcode is an ISBN → query Google Books API and/or Open Library API.
+- If the barcode is a UPC/EAN for audio → query MusicBrainz.
+- If the barcode is a UPC/EAN for video → query TMDB or another open API.
+
+The backend should:
+- Receive the barcode via AJAX/Fetch POST.
+- Detect the media type based on API results.
+- Return a JSON object containing all fields needed to pre-fill the "Add Media" form.
+
+### 3. Autofill the Add Media Form
+- When metadata is returned, automatically populate the form fields.
+- Allow the user to edit the fields before submitting.
+- When submitted, insert into media_item and the appropriate detail table.
+
+### 4. Code Requirements
+- Write clean, modular Flask routes.
+- Add a new `/scan` route for the UI.
+- Add a new `/lookup_barcode` API endpoint that accepts JSON { barcode: "..." }.
+- Implement client-side JS for:
+  - Starting/stopping the camera
+  - Scanning the barcode
+  - Sending the barcode to the backend
+  - Autofilling the form
+
+### 5. Deliverables
+Please generate:
+- The Flask route code for `/lookup_barcode`
+- The JS code for barcode scanning using ZXing or QuaggaJS
+- The HTML template for the scanning UI
+- The JS code that autofills the Add Media form
+- Any helper functions needed for metadata lookup
+- Example responses from each metadata API
+- Error handling for unknown or unsupported barcodes
+
+Make sure the code integrates cleanly with my existing Flask app structure.

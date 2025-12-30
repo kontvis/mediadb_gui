@@ -36,4 +36,23 @@
     </div>
     <button class="btn btn-primary">Add Audio</button>
   </form>
+  <script>
+    (function(){
+      try {
+        const raw = localStorage.getItem('barcode_prefill');
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (!data) return;
+        if (data.title) document.querySelector('input[name=title]').value = data.title;
+        if (data.artist) document.querySelector('input[name=artist]').value = data.artist;
+        if (data.album) document.querySelector('input[name=album]').value = data.album;
+        if (data.track_count) document.querySelector('input[name=track_count]').value = data.track_count;
+        if (data.audio_format) document.querySelector('input[name=format]').value = data.audio_format;
+        if (data.audio_genre) document.querySelector('input[name=genre]').value = data.audio_genre;
+        if (data.year) document.querySelector('input[name=year]').value = data.year;
+        if (data.notes) document.querySelector('textarea[name=notes]').value = data.notes;
+        localStorage.removeItem('barcode_prefill');
+      } catch(e) { console.error(e); }
+    })();
+  </script>
 {% endblock %}

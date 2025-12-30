@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Scan Barcode</h2>
+  <p>Point your device camera at the barcode. When detected, the app will look up metadata and open the Add form pre-filled.</p>
+
+  <div id="scanner" class="mb-3" style="min-height:200px; background:#000; display:flex; align-items:center; justify-content:center; color:#fff">Camera preview will appear here.</div>
+
+  <div class="mb-3">
+    <button id="startBtn" class="btn btn-primary">Start Scanner</button>
+    <button id="stopBtn" class="btn btn-secondary">Stop Scanner</button>
+  </div>
+
+  <div id="status" class="mt-2"></div>
+
+  <!-- Manual entry fallback -->
+  <div class="card mt-4 p-3">
+    <h5>Manual Entry</h5>
+    <p class="text-muted">If the scanner reads the wrong barcode, you can manually enter the ISBN below:</p>
+    <div class="input-group">
+      <input type="text" id="manualBarcode" class="form-control" placeholder="Enter ISBN-13 or barcode (e.g., 9780590353427)">
+      <button class="btn btn-outline-primary" id="manualBtn">Lookup</button>
+    </div>
+    <div id="manualStatus" class="mt-2"></div>
+  </div>
+
+  <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
+  <script>
+    const statusEl = document.getElementById('status');
+    const manualStatusEl = document.getElementById('manualStatus');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const manualInput = document.getElementById('manualBarcode');
+    const manualBtn = document.getElementById('manualBtn');
+
+    function doLookup(barcode) {
+      fetch('/lookup_barcode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ barcode: barcode })
+      }).then(r => r.json()).then(data => {
+        if (data.error) {
+          manualStatusEl.innerText = '❌ ' + data.error;
+          return;
+        }
+        // store prefill and redirect to add page
+        const mediaType = (data.media_type || 'book');
+        localStorage.setItem('barcode_prefill', JSON.stringify(data));
+        if (mediaType === 'book') window.location.href = '/add/book';
+        else if (mediaType === 'audio') window.location.href = '/add/audio';
+        else if (mediaType === 'video') window.location.href = '/add/video';
+        else window.location.href = '/media';
+      }).catch(err => {
+        manualStatusEl.innerText = '❌ Network error: ' + err;
+      });
+    }
+
+    function startScanner() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        statusEl.innerText = 'Camera API not supported in this browser.';
+        return;
+      }
+
+      Quagga.init({
+        inputStream: {
+          name: 'Live',
+          type: 'LiveStream',
+          target: document.querySelector('#scanner'),
+          constraints: { facingMode: 'environment' }
+        },
+        decoder: {
+          readers: ['ean_reader','upc_reader','upc_e_reader','ean_8_reader','code_128_reader','code_39_reader']
+        }
+      }, function(err) {
+        if (err) { statusEl.innerText = 'Init error: ' + err; return; }
+        Quagga.start();
+        statusEl.innerText = 'Scanning...';
+      });
+
+      Quagga.onDetected(onDetected);
+    }
+
+    function stopScanner() {
+      Quagga.offDetected(onDetected);
+      Quagga.stop();
+      statusEl.innerText = 'Scanner stopped.';
+    }
+
+    function onDetected(result) {
+      const code = result && result.codeResult && result.codeResult.code;
+      if (!code) return;
+      const codeInfo = `Code: ${code} | Length: ${code.length} | Type: ${result.codeResult.format}`;
+      statusEl.innerText = 'Barcode detected: ' + codeInfo;
+      console.log('Detected barcode:', { code, length: code.length, format: result.codeResult.format });
+      stopScanner();
+
+      // send to backend
+      doLookup(code);
+    }
+
+    startBtn.addEventListener('click', startScanner);
+    stopBtn.addEventListener('click', stopScanner);
+    manualBtn.addEventListener('click', function() {
+      const bc = manualInput.value.trim();
+      if (!bc) {
+        manualStatusEl.innerText = '⚠️ Enter a barcode.';
+        return;
+      }
+      manualStatusEl.innerText = 'Looking up...';
+      doLookup(bc);
+    });
+    manualInput.addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') manualBtn.click();
+    });
+  </script>
+{% endblock %}

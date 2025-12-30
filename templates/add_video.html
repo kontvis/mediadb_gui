@@ -36,4 +36,23 @@
     </div>
     <button class="btn btn-primary">Add Video</button>
   </form>
+  <script>
+    (function(){
+      try {
+        const raw = localStorage.getItem('barcode_prefill');
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (!data) return;
+        if (data.title) document.querySelector('input[name=title]').value = data.title;
+        if (data.director) document.querySelector('input[name=director]').value = data.director;
+        if (data.runtime_minutes) document.querySelector('input[name=runtime_minutes]').value = data.runtime_minutes;
+        if (data.rating) document.querySelector('input[name=rating]').value = data.rating;
+        if (data.video_format) document.querySelector('input[name=format]').value = data.video_format;
+        if (data.video_genre) document.querySelector('input[name=genre]').value = data.video_genre;
+        if (data.year) document.querySelector('input[name=year]').value = data.year;
+        if (data.notes) document.querySelector('textarea[name=notes]').value = data.notes;
+        localStorage.removeItem('barcode_prefill');
+      } catch(e) { console.error(e); }
+    })();
+  </script>
 {% endblock %}
