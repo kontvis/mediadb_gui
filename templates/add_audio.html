@@ -39,7 +39,7 @@
   <script>
     (function(){
       try {
-        const raw = localStorage.getItem('barcode_prefill');
+        let raw = localStorage.getItem('barcode_prefill') || localStorage.getItem('photo_prefill');
         if (!raw) return;
         const data = JSON.parse(raw);
         if (!data) return;
@@ -52,6 +52,7 @@
         if (data.year) document.querySelector('input[name=year]').value = data.year;
         if (data.notes) document.querySelector('textarea[name=notes]').value = data.notes;
         localStorage.removeItem('barcode_prefill');
+        localStorage.removeItem('photo_prefill');
       } catch(e) { console.error(e); }
     })();
   </script>

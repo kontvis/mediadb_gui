@@ -6,6 +6,7 @@ import csv
 import io
 import requests
 import json
+import base64
 from config import Config
 
 # Initialize Flask app and configuration
@@ -239,10 +240,136 @@ def detect_and_lookup(barcode):
     return None
 
 
+def process_image_for_media(image_data):
+    """Process uploaded image using Google Vision API to detect media type and extract text."""
+    api_key = app.config.get('GOOGLE_VISION_API_KEY')
+    if not api_key:
+        return {'error': 'Google Vision API key not configured'}
+
+    try:
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data.split(',')[1])  # Remove data:image/jpeg;base64,
+
+        # Use requests to call Vision API directly with API key
+        vision_url = f'https://vision.googleapis.com/v1/images:annotate?key={api_key}'
+        
+        image_content = base64.b64encode(image_bytes).decode('utf-8')
+        
+        request_body = {
+            "requests": [{
+                "image": {"content": image_content},
+                "features": [
+                    {"type": "OBJECT_LOCALIZATION", "maxResults": 10},
+                    {"type": "TEXT_DETECTION", "maxResults": 1}
+                ]
+            }]
+        }
+        
+        response = requests.post(vision_url, json=request_body)
+        if response.status_code != 200:
+            return {'error': f'Vision API error: {response.text}'}
+        
+        data = response.json()
+        if 'responses' not in data or not data['responses']:
+            return {'error': 'No response from Vision API'}
+        
+        result = data['responses'][0]
+        
+        # Extract objects
+        objects = result.get('localizedObjectAnnotations', [])
+        media_type = None
+        confidence = 0
+        for obj in objects:
+            name = obj['name'].lower()
+            score = obj['score']
+            if 'book' in name and score > confidence:
+                media_type = 'book'
+                confidence = score
+            elif ('cd' in name or 'disc' in name) and score > confidence:
+                media_type = 'audio'  # Assume CD is audio
+                confidence = score
+            elif ('dvd' in name or 'bluray' in name or 'video' in name) and score > confidence:
+                media_type = 'video'
+                confidence = score
+        
+        # Extract text
+        text_result = result.get('textAnnotations', [])
+        full_text = text_result[0]['description'] if text_result else ""
+        
+        # Parse text for fields
+        extracted = parse_media_text(full_text, media_type or 'book')
+        
+        return {
+            'media_type': media_type or 'book',
+            'title': extracted.get('title'),
+            'author': extracted.get('author'),
+            'year': extracted.get('year'),
+            'full_text': full_text,
+            'confidence': confidence
+        }
+
+    except Exception as e:
+        return {'error': f'Vision API error: {str(e)}'}
+
+
+def parse_media_text(text, media_type):
+    """Parse OCR text to extract title, author, etc. using heuristics."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    extracted = {}
+
+    # Simple heuristics
+    for line in lines:
+        # Look for author patterns (common names, "by Author")
+        if 'by ' in line.lower() or len(line.split()) == 2 and not any(char.isdigit() for char in line):
+            if not extracted.get('author'):
+                extracted['author'] = line.replace('by ', '').strip()
+
+        # Look for year (4 digits)
+        import re
+        years = re.findall(r'\b(19|20)\d{2}\b', line)
+        if years and not extracted.get('year'):
+            extracted['year'] = years[0]
+
+    # Assume first line or longest line is title
+    if lines:
+        potential_titles = [line for line in lines if len(line) > 10 and not line.lower().startswith(('isbn', 'by ', 'copyright'))]
+        if potential_titles:
+            extracted['title'] = max(potential_titles, key=len)
+
+    return extracted
+
+
 @app.route('/scan')
 def scan_ui():
-    """Render barcode scanning UI."""
+    """Render photo capture UI."""
     return render_template('scan.html')
+
+
+@app.route('/process_image', methods=['POST'])
+def process_image():
+    """API endpoint: accepts JSON { image: 'data:image/jpeg;base64,...' } and returns extracted metadata JSON."""
+    data = request.get_json(force=True)
+    image_data = data.get('image') if data else None
+    if not image_data:
+        return ({'error': 'image required'}, 400)
+
+    try:
+        meta = process_image_for_media(image_data)
+        if 'error' in meta:
+            return ({'error': meta['error']}, 500)
+
+        # Normalize response fields to form-compatible keys
+        response = {
+            'media_type': meta.get('media_type'),
+            'title': meta.get('title'),
+            'year': meta.get('year'),
+            'notes': f"OCR Text: {meta.get('full_text', '')}",
+            'author': meta.get('author'),
+            'confidence': meta.get('confidence'),
+        }
+        return (response, 200)
+    except Exception as e:
+        return ({'error': f'Processing error: {str(e)}'}, 500)
 
 
 @app.route('/lookup_barcode', methods=['POST'])

@@ -27,20 +27,21 @@ Progressive improvements: Optionally add a responsive list view, small-screen CS
 v2.0
 new feature set:
 
-### 1. Barcode Scanning (Client-Side)
-- Add a page or modal that allows the user to scan a barcode using their device camera.
-- Use an open-source JavaScript library such as ZXing or QuaggaJS.
-- The scanner should return the barcode value (ISBN, UPC, or EAN).
+### 1. Photo Capture (Client-Side)
+- Add a page that allows the user to take a photo of their book, DVD, or CD using their device camera.
+- Use HTML5 file input with camera capture.
+- The photo should capture the front cover/spine with visible text.
 
-### 2. Metadata Lookup (Server-Side)
-Based on the scanned barcode:
-- If the barcode is an ISBN → query Google Books API and/or Open Library API.
-- If the barcode is a UPC/EAN for audio → query MusicBrainz.
-- If the barcode is a UPC/EAN for video → query TMDB or another open API.
+### 2. Intelligent Processing (Server-Side)
+Process the uploaded photo using Google Vision API:
+- Detect objects to classify as book, DVD (video), or CD (audio).
+- Extract text (OCR) from the image.
+- Parse the text to identify title, author, year, etc. using heuristics.
 
 The backend should:
-- Receive the barcode via AJAX/Fetch POST.
-- Detect the media type based on API results.
+- Receive the image via AJAX/Fetch POST as base64.
+- Use Google Vision API for object detection and OCR.
+- Parse OCR text to extract metadata fields.
 - Return a JSON object containing all fields needed to pre-fill the "Add Media" form.
 
 ### 3. Autofill the Add Media Form
