@@ -14,6 +14,7 @@
     <p><strong>Physical Description:</strong> {{item.book.physical_description or '—'}}</p>
     <p><strong>Genre:</strong> {{item.book.genre or '—'}}</p>
     <a class="btn btn-secondary" href="/edit/book/{{item.id}}">Edit Book</a>
+    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal" data-item-id="{{item.id}}" data-item-title="{{item.title}}" data-item-type="{{item.media_type}}" style="margin-left: 10px;">Delete Item</button>
   {% elif item.media_type == 'audio' and item.audio %}
     <h4>Audio Details</h4>
     <p><strong>Artist:</strong> {{item.audio.artist or '—'}}</p>
@@ -22,6 +23,7 @@
     <p><strong>Format:</strong> {{item.audio.format or '—'}}</p>
     <p><strong>Genre:</strong> {{item.audio.genre or '—'}}</p>
     <a class="btn btn-secondary" href="/edit/audio/{{item.id}}">Edit Audio</a>
+    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal" data-item-id="{{item.id}}" data-item-title="{{item.title}}" data-item-type="{{item.media_type}}" style="margin-left: 10px;">Delete Item</button>
   {% elif item.media_type == 'video' and item.video %}
     <h4>Video Details</h4>
     <p><strong>Director:</strong> {{item.video.director or '—'}}</p>
@@ -30,7 +32,45 @@
     <p><strong>Format:</strong> {{item.video.format or '—'}}</p>
     <p><strong>Genre:</strong> {{item.video.genre or '—'}}</p>
     <a class="btn btn-secondary" href="/edit/video/{{item.id}}">Edit Video</a>
+    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal" data-item-id="{{item.id}}" data-item-title="{{item.title}}" data-item-type="{{item.media_type}}" style="margin-left: 10px;">Delete Item</button>
   {% endif %}
 
   <a class="btn btn-link mt-3" href="/media">Back to list</a>
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="deleteModalLabel">Confirm Delete</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p id="deleteMessage"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">No, Cancel</button>
+          <form id="deleteForm" method="post" style="display: inline;">
+            <button type="submit" class="btn btn-danger">Yes, Delete</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const deleteModal = document.getElementById('deleteModal');
+    const deleteMessage = document.getElementById('deleteMessage');
+    const deleteForm = document.getElementById('deleteForm');
+    
+    deleteModal.addEventListener('show.bs.modal', function (event) {
+      const button = event.relatedTarget;
+      const itemId = button.getAttribute('data-item-id');
+      const itemTitle = button.getAttribute('data-item-title');
+      const itemType = button.getAttribute('data-item-type');
+      
+      deleteMessage.textContent = `Delete ${itemType} "${itemTitle}"? This action cannot be undone.`;
+      deleteForm.action = `/delete/${itemId}`;
+    });
+  </script>
 {% endblock %}

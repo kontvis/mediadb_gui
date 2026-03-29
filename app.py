@@ -4,6 +4,9 @@ from datetime import date
 import os
 import csv
 import io
+import requests
+import json
+import base64
 from config import Config
 
 # Initialize Flask app and configuration
@@ -123,6 +126,301 @@ def view_media(item_id):
     item = MediaItem.query.get_or_404(item_id)
     return render_template('view_media.html', item=item)
 
+
+@app.route('/delete/<int:item_id>', methods=['POST'])
+def delete_item(item_id):
+    """Delete a media item."""
+    item = MediaItem.query.get_or_404(item_id)
+    db.session.delete(item)
+    db.session.commit()
+    flash(f'{item.media_type.title()} "{item.title}" deleted successfully.', 'success')
+    return redirect(url_for('list_media'))
+
+
+# --- Barcode lookup helpers ---
+def lookup_isbn(isbn):
+    """Try Google Books then OpenLibrary for ISBN metadata."""
+    result = {}
+    # Google Books
+    try:
+        gb_url = f'https://www.googleapis.com/books/v1/volumes?q=isbn:{isbn}'
+        r = requests.get(gb_url, timeout=5)
+        if r.ok:
+            data = r.json()
+            if data.get('totalItems', 0) > 0:
+                vol = data['items'][0]['volumeInfo']
+                result.update({
+                    'title': vol.get('title'),
+                    'author': ', '.join(vol.get('authors', [])) if vol.get('authors') else None,
+                    'publisher': vol.get('publisher'),
+                    'year': vol.get('publishedDate', '')[:4] if vol.get('publishedDate') else None,
+                    'isbn': isbn,
+                })
+                return result
+    except Exception:
+        pass
+
+    # OpenLibrary
+    try:
+        ol_url = f'https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data'
+        r = requests.get(ol_url, timeout=5)
+        if r.ok:
+            data = r.json()
+            key = f'ISBN:{isbn}'
+            if key in data:
+                item = data[key]
+                result.update({
+                    'title': item.get('title'),
+                    'author': ', '.join([a.get('name') for a in item.get('authors', [])]) if item.get('authors') else None,
+                    'publisher': item.get('publishers')[0].get('name') if item.get('publishers') else None,
+                    'year': item.get('publish_date', '')[:4] if item.get('publish_date') else None,
+                    'isbn': isbn,
+                })
+                return result
+    except Exception:
+        pass
+
+    return None
+
+
+def lookup_upc_musicbrainz(upc):
+    """Lookup UPC via MusicBrainz (release search). Returns artist/title/year if found."""
+    try:
+        url = f'https://musicbrainz.org/ws/2/release/?query=barcode:{upc}&fmt=json'
+        r = requests.get(url, headers={'User-Agent': 'dbgui/1.0 (email@example.com)'}, timeout=5)
+        if r.ok:
+            data = r.json()
+            if data.get('releases'):
+                rel = data['releases'][0]
+                title = rel.get('title')
+                artist = None
+                if rel.get('artist-credit'):
+                    artist = ', '.join([a.get('name') for a in rel.get('artist-credit') if a.get('name')])
+                year = rel.get('date', '')[:4] if rel.get('date') else None
+                return {'title': title, 'artist': artist, 'year': year, 'upc': upc}
+    except Exception:
+        pass
+    return None
+
+
+def lookup_upc_tmdb(upc):
+    """Lookup UPC for video via TMDB if API key provided. Returns basic metadata."""
+    tmdb_key = os.environ.get('TMDB_API_KEY')
+    if not tmdb_key:
+        return None
+    try:
+        url = f'https://api.themoviedb.org/3/search/movie?api_key={tmdb_key}&query={upc}'
+        r = requests.get(url, timeout=5)
+        if r.ok:
+            data = r.json()
+            if data.get('results'):
+                mv = data['results'][0]
+                return {'title': mv.get('title'), 'year': mv.get('release_date', '')[:4] if mv.get('release_date') else None, 'upc': upc}
+    except Exception:
+        pass
+    return None
+
+
+def detect_and_lookup(barcode):
+    """Detect barcode type simply by length/prefix then use appropriate lookup functions."""
+    bc = barcode.strip()
+    # Heuristic: ISBN-10 (10) or ISBN-13 (13)
+    if len(bc) in (10, 13):
+        res = lookup_isbn(bc)
+        if res:
+            res['detected_type'] = 'isbn'
+            res['media_type'] = 'book'
+            return res
+
+    # UPC/EAN typically 12 or 13 digits
+    if len(bc) in (12, 13):
+        # try musicbrainz
+        res = lookup_upc_musicbrainz(bc)
+        if res:
+            res['detected_type'] = 'upc'
+            res['media_type'] = 'audio'
+            return res
+        # try tmdb
+        res = lookup_upc_tmdb(bc)
+        if res:
+            res['detected_type'] = 'upc'
+            res['media_type'] = 'video'
+            return res
+
+    return None
+
+
+def process_image_for_media(image_data):
+    """Process uploaded image using Google Vision API to detect media type and extract text."""
+    api_key = app.config.get('GOOGLE_VISION_API_KEY')
+    if not api_key:
+        return {'error': 'Google Vision API key not configured'}
+
+    try:
+        # Decode base64 image
+        image_bytes = base64.b64decode(image_data.split(',')[1])  # Remove data:image/jpeg;base64,
+
+        # Use requests to call Vision API directly with API key
+        vision_url = f'https://vision.googleapis.com/v1/images:annotate?key={api_key}'
+        
+        image_content = base64.b64encode(image_bytes).decode('utf-8')
+        
+        request_body = {
+            "requests": [{
+                "image": {"content": image_content},
+                "features": [
+                    {"type": "OBJECT_LOCALIZATION", "maxResults": 10},
+                    {"type": "TEXT_DETECTION", "maxResults": 1}
+                ]
+            }]
+        }
+        
+        response = requests.post(vision_url, json=request_body)
+        if response.status_code != 200:
+            return {'error': f'Vision API error: {response.text}'}
+        
+        data = response.json()
+        if 'responses' not in data or not data['responses']:
+            return {'error': 'No response from Vision API'}
+        
+        result = data['responses'][0]
+        
+        # Extract objects
+        objects = result.get('localizedObjectAnnotations', [])
+        media_type = None
+        confidence = 0
+        for obj in objects:
+            name = obj['name'].lower()
+            score = obj['score']
+            if 'book' in name and score > confidence:
+                media_type = 'book'
+                confidence = score
+            elif ('cd' in name or 'disc' in name) and score > confidence:
+                media_type = 'audio'  # Assume CD is audio
+                confidence = score
+            elif ('dvd' in name or 'bluray' in name or 'video' in name) and score > confidence:
+                media_type = 'video'
+                confidence = score
+        
+        # Extract text
+        text_result = result.get('textAnnotations', [])
+        full_text = text_result[0]['description'] if text_result else ""
+        
+        # Parse text for fields
+        extracted = parse_media_text(full_text, media_type or 'book')
+        
+        return {
+            'media_type': media_type or 'book',
+            'title': extracted.get('title'),
+            'author': extracted.get('author'),
+            'year': extracted.get('year'),
+            'full_text': full_text,
+            'confidence': confidence
+        }
+
+    except Exception as e:
+        return {'error': f'Vision API error: {str(e)}'}
+
+
+def parse_media_text(text, media_type):
+    """Parse OCR text to extract title, author, etc. using heuristics."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    extracted = {}
+
+    # Simple heuristics
+    for line in lines:
+        # Look for author patterns (common names, "by Author")
+        if 'by ' in line.lower() or len(line.split()) == 2 and not any(char.isdigit() for char in line):
+            if not extracted.get('author'):
+                extracted['author'] = line.replace('by ', '').strip()
+
+        # Look for year (4 digits)
+        import re
+        years = re.findall(r'\b(19|20)\d{2}\b', line)
+        if years and not extracted.get('year'):
+            extracted['year'] = years[0]
+
+    # Assume first line or longest line is title
+    if lines:
+        potential_titles = [line for line in lines if len(line) > 10 and not line.lower().startswith(('isbn', 'by ', 'copyright'))]
+        if potential_titles:
+            extracted['title'] = max(potential_titles, key=len)
+
+    return extracted
+
+
+@app.route('/scan')
+def scan_ui():
+    """Render photo capture UI."""
+    return render_template('scan.html')
+
+
+@app.route('/process_image', methods=['POST'])
+def process_image():
+    """API endpoint: accepts JSON { image: 'data:image/jpeg;base64,...' } and returns extracted metadata JSON."""
+    data = request.get_json(force=True)
+    image_data = data.get('image') if data else None
+    if not image_data:
+        return ({'error': 'image required'}, 400)
+
+    try:
+        meta = process_image_for_media(image_data)
+        if 'error' in meta:
+            return ({'error': meta['error']}, 500)
+
+        # Normalize response fields to form-compatible keys
+        response = {
+            'media_type': meta.get('media_type'),
+            'title': meta.get('title'),
+            'year': meta.get('year'),
+            'notes': f"OCR Text: {meta.get('full_text', '')}",
+            'author': meta.get('author'),
+            'confidence': meta.get('confidence'),
+        }
+        return (response, 200)
+    except Exception as e:
+        return ({'error': f'Processing error: {str(e)}'}, 500)
+
+
+@app.route('/lookup_barcode', methods=['POST'])
+def lookup_barcode():
+    """API endpoint: accepts JSON { barcode: '...' } and returns metadata JSON."""
+    data = request.get_json(force=True)
+    barcode = data.get('barcode') if data else None
+    if not barcode:
+        return ({'error': 'barcode required'}, 400)
+
+    try:
+        meta = detect_and_lookup(barcode)
+        if not meta:
+            return ({'error': 'No metadata found for barcode', 'barcode': barcode}, 404)
+        # Normalize response fields to form-compatible keys
+        response = {
+            'barcode': barcode,
+            'media_type': meta.get('media_type'),
+            'title': meta.get('title'),
+            'year': meta.get('year'),
+            'notes': None,
+            'author': meta.get('author') or meta.get('artist'),
+            'isbn': meta.get('isbn'),
+            'publisher': meta.get('publisher'),
+            'page_count': None,
+            'physical_description': None,
+            'book_genre': meta.get('genre') if meta.get('media_type') == 'book' else None,
+            'artist': meta.get('artist') if meta.get('media_type') == 'audio' else None,
+            'album': None,
+            'track_count': None,
+            'audio_format': None,
+            'audio_genre': None,
+            'director': meta.get('director') if meta.get('media_type') == 'video' else None,
+            'runtime_minutes': None,
+            'rating': None,
+            'video_format': None,
+            'video_genre': None,
+        }
+        return (response, 200)
+    except Exception as e:
+        return ({'error': f'Lookup error: {str(e)}'}, 500)
 
 # --- Add forms ---
 @app.route('/add/book', methods=['GET', 'POST'])

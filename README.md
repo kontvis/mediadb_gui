@@ -17,14 +17,16 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-3. Configure the database (PostgreSQL) and secret key (optional):
+3. Configure the database (PostgreSQL), secret key, and Google Vision API key (optional):
 
 ```bash
 export DATABASE_URL='postgresql://user:pass@localhost:5432/dbname'
 export SECRET_KEY='your-secret'
+export GOOGLE_VISION_API_KEY='your-google-vision-api-key'
 ```
 
 If you omit `DATABASE_URL`, the app will use a local SQLite file `db.sqlite3` for easy testing.
+If you omit `GOOGLE_VISION_API_KEY`, photo processing will not work.
 
 4. Run the app:
 
