@@ -127,6 +127,16 @@ def view_media(item_id):
     return render_template('view_media.html', item=item)
 
 
+@app.route('/delete/<int:item_id>', methods=['POST'])
+def delete_item(item_id):
+    """Delete a media item."""
+    item = MediaItem.query.get_or_404(item_id)
+    db.session.delete(item)
+    db.session.commit()
+    flash(f'{item.media_type.title()} "{item.title}" deleted successfully.', 'success')
+    return redirect(url_for('list_media'))
+
+
 # --- Barcode lookup helpers ---
 def lookup_isbn(isbn):
     """Try Google Books then OpenLibrary for ISBN metadata."""
