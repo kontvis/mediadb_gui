@@ -34,7 +34,7 @@ items = items.outerjoin(BookDetails).outerjoin(AudioDetails).outerjoin(VideoDeta
 genre_expr = db.func.coalesce(BookDetails.genre, AudioDetails.genre, VideoDetails.genre)
 ```
 
-## Barcode Scanning & API Integration
+## Photo Capture& API Integration
 **Photo Processing Logic** (`process_image_for_media`):
 - Accept base64 image data from client
 - Use Google Vision API for object detection (book/CD/DVD) and OCR

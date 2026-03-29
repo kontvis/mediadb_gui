@@ -30,7 +30,7 @@ new feature set:
 ### 1. Photo Capture (Client-Side)
 - Add a page that allows the user to take a photo of their book, DVD, or CD using their device camera.
 - Use HTML5 file input with camera capture.
-- The photo should capture the front cover/spine with visible text.
+- The photo should capture the front cover or spine with visible text.
 
 ### 2. Intelligent Processing (Server-Side)
 Process the uploaded photo using Google Vision API:
