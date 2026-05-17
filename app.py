@@ -233,7 +233,7 @@ Rules:
 - "media_type" should be "book" for a title page; use "audio" or "video" only
   if the image is clearly not a book.
 
-Return exactly this JSON shape:
+Return exactly this JSON shape (your entire reply must be this object, nothing else):
 {
   "media_type": "book",
   "title": null,
@@ -246,12 +246,46 @@ Return exactly this JSON shape:
 """
 
 
+def _claude_response_text(message):
+    """Collect text from all text blocks in a Claude message."""
+    parts = []
+    for block in message.content:
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+            parts.append(block.text)
+    return "\n".join(parts).strip()
+
+
+def _parse_claude_json(text):
+    """Parse JSON from Claude output, tolerating markdown fences or leading prose."""
+    if not text:
+        raise json.JSONDecodeError("empty response", text, 0)
+
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        lines = candidate.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        candidate = "\n".join(lines).strip()
+
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start != -1 and end > start:
+            return json.loads(candidate[start : end + 1])
+        raise
+
+
 def process_image_for_media(image_data):
     """Send image to Claude and return extracted book metadata as structured fields."""
     api_key = app.config.get("ANTHROPIC_API_KEY")
     if not api_key:
         return {"error": "Anthropic API key not configured"}
 
+    raw = ""
     try:
         encoded = image_data.split(",", maxsplit=1)[-1]
         image_bytes = base64.b64decode(encoded)
@@ -279,8 +313,12 @@ def process_image_for_media(image_data):
             }],
         )
 
-        raw = message.content[0].text.strip()
-        extracted = json.loads(raw)
+        raw = _claude_response_text(message)
+        extracted = _parse_claude_json(raw)
+
+        year = extracted.get("year")
+        if year is not None:
+            year = str(year)
 
         return {
             "media_type": extracted.get("media_type") or "book",
@@ -288,14 +326,17 @@ def process_image_for_media(image_data):
             "author":     extracted.get("author"),
             "publisher":  extracted.get("publisher"),
             "isbn":       extracted.get("isbn"),
-            "year":       extracted.get("year"),
+            "year":       year,
             "notes":      extracted.get("notes"),
             "full_text":  "",
             "confidence": 1.0,
         }
 
     except json.JSONDecodeError as e:
-        return {"error": f"Could not parse Claude response as JSON: {e}"}
+        preview = raw[:200] if raw else "(empty)"
+        return {
+            "error": f"Could not parse Claude response as JSON: {e}. Response started with: {preview!r}"
+        }
     except Exception as e:
         return {"error": f"Claude API error: {str(e)}"}
 
