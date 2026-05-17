@@ -19,26 +19,12 @@
     <img id="previewImg" class="img-fluid" style="max-width:300px;">
   </div>
 
-  <!-- Manual entry fallback -->
-  <div class="card mt-4 p-3">
-    <h5>Manual Entry</h5>
-    <p class="text-muted">If processing fails, you can manually enter details below:</p>
-    <div class="input-group">
-      <input type="text" id="manualBarcode" class="form-control" placeholder="Enter title or ISBN">
-      <button class="btn btn-outline-primary" id="manualBtn">Lookup</button>
-    </div>
-    <div id="manualStatus" class="mt-2"></div>
-  </div>
-
   <script>
     const statusEl = document.getElementById('status');
-    const manualStatusEl = document.getElementById('manualStatus');
     const processBtn = document.getElementById('processBtn');
     const imageInput = document.getElementById('imageInput');
     const previewImg = document.getElementById('previewImg');
     const previewDiv = document.getElementById('preview');
-    const manualInput = document.getElementById('manualBarcode');
-    const manualBtn = document.getElementById('manualBtn');
 
     imageInput.addEventListener('change', function(e) {
       const file = e.target.files[0];
@@ -87,27 +73,5 @@
       reader.readAsDataURL(file);
     });
 
-    // Manual lookup (keep barcode lookup for fallback)
-    manualBtn.addEventListener('click', function() {
-      const query = manualInput.value.trim();
-      if (!query) return;
-
-      manualStatusEl.innerText = 'Looking up...';
-      fetch('/lookup_barcode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ barcode: query })
-      }).then(r => r.json()).then(data => {
-        if (data.error) {
-          manualStatusEl.innerText = '❌ ' + data.error;
-          return;
-        }
-        const mediaType = data.media_type || 'book';
-        localStorage.setItem('barcode_prefill', JSON.stringify(data));
-        if (mediaType === 'book') window.location.href = '/add/book';
-        else if (mediaType === 'audio') window.location.href = '/add/audio';
-        else if (mediaType === 'video') window.location.href = '/add/video';
-      });
-    });
   </script>
 {% endblock %}

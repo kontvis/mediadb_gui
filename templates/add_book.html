@@ -40,7 +40,7 @@
       // Autofill from lookup if available
       (function(){
         try {
-          let raw = localStorage.getItem('barcode_prefill') || localStorage.getItem('photo_prefill');
+          let raw = localStorage.getItem('photo_prefill');
           if (!raw) return;
           const data = JSON.parse(raw);
           if (!data) return;
@@ -53,7 +53,6 @@
           if (data.book_genre) document.querySelector('input[name=genre]').value = data.book_genre;
           if (data.notes) document.querySelector('textarea[name=notes]').value = data.notes;
           // clear after use
-          localStorage.removeItem('barcode_prefill');
           localStorage.removeItem('photo_prefill');
         } catch(e) { console.error(e); }
       })();
