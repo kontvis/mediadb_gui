@@ -9,7 +9,7 @@ This is a Flask web application for managing a family media catalog (books, audi
 - Relationships configured with `back_populates` and `cascade='all, delete-orphan'`
 
 **Key Files**:
-- `app.py`: Main application logic, routes, models, barcode lookups
+- `app.py`: Main application logic, routes, models, image scanning
 - `config.py`: Environment-based configuration (DATABASE_URL, SECRET_KEY)
 - `templates/`: Jinja2 templates with Bootstrap 5 responsive design
 - Database tables auto-created via `db.create_all()` when using SQLite
@@ -84,9 +84,9 @@ flask run --host=127.0.0.1 --port=5000
 2. Add relationship to `MediaItem`
 3. Create add/edit routes following existing pattern
 4. Add navbar links and templates
-5. Update CSV processing and barcode detection
+5. Update CSV processing and image/OCR parsing flow
 
-**API Keys**: Set `TMDB_API_KEY` env var for video barcode lookups (optional), `GOOGLE_VISION_API_KEY` for photo processing (service account JSON or API key)
+**API Keys**: Set `GOOGLE_VISION_API_KEY` for photo processing (service account JSON or API key)
 
 ## Code Style Notes
 - Use `request.form.get('field')` with manual type conversion (int/float checks)

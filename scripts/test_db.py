@@ -1,4 +1,5 @@
 """Verify DATABASE_URL can connect (run while SSH tunnel is up)."""
+
 import os
 import sys
 
@@ -14,7 +15,10 @@ if not url:
 try:
     import psycopg2
 except ImportError:
-    print("Install dependencies: pip install -r requirements.txt", file=sys.stderr)
+    print(
+        "Install dependencies: pip install -r requirements.txt",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 try:
@@ -22,7 +26,10 @@ try:
     conn.close()
 except Exception as exc:
     print(f"Connection failed: {exc}", file=sys.stderr)
-    print("Is the SSH tunnel running?  .\\scripts\\db-tunnel.ps1", file=sys.stderr)
+    print(
+        "Is the SSH tunnel running?  .\\scripts\\db-tunnel.ps1",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 print("Database connection OK.")
