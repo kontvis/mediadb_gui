@@ -80,51 +80,64 @@ Or, without activating (Windows example):
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### 4. Configure the database, secret key, and Google Vision API key (optional)
+### 4. Configure environment (`.env`)
 
-Copy or create a `.env` file in the project root (see your local `.env`; it is gitignored). The app reads **environment variables**, not the file itself, unless you export them or load them another way.
+Copy [`.env.example`](.env.example) to `.env` in the project root and fill in your values. That file lists every setting, with comments for local Linux vs Windows-over-SSH setups. The app loads `.env` automatically on startup (`python-dotenv`).
 
-**Linux / macOS**
+- Omit `DATABASE_URL` to use a local SQLite file (`db.sqlite3`) for quick testing.
+- Omit optional API keys if you do not need those features (see comments in `.env.example`).
 
-```bash
-export DATABASE_URL='postgresql://user:pass@localhost:5432/dbname'
-export SECRET_KEY='your-secret'
-export GOOGLE_VISION_API_KEY='your-google-vision-api-key'
-```
+On Linux, when PostgreSQL runs on the same machine, set `DATABASE_URL` to use `localhost:5432` and leave the SSH tunnel variables unset; skip section 4b.
 
-**Windows (PowerShell)**
+### 4b. Remote database from Windows (SSH tunnel)
 
-```powershell
-$env:DATABASE_URL = 'postgresql://user:pass@localhost:5432/dbname'
-$env:SECRET_KEY = 'your-secret'
-$env:GOOGLE_VISION_API_KEY = 'your-google-vision-api-key'
-```
+When the database lives on a Linux server on your network, use an SSH tunnel so `DATABASE_URL` can target `localhost` on your laptop (PostgreSQL stays on the server; only SSH crosses the network). Configure `SSH_TUNNEL_*` and matching `DATABASE_URL` port values in `.env` per [`.env.example`](.env.example).
 
-If you omit `DATABASE_URL`, the app will use a local SQLite file `db.sqlite3` for easy testing.
-If you omit `GOOGLE_VISION_API_KEY`, photo processing will not work.
+1. **Terminal 1** — start the tunnel (leave it running):
+
+   Do **not** run `db-tunnel.ps1` from Git Bash or by double-clicking it — Windows may ask which app should “open” the file. Use one of these instead:
+
+   **Easiest (any terminal — CMD, PowerShell, or Git Bash)**
+
+   ```bat
+   scripts\db-tunnel.bat
+   ```
+
+   **PowerShell** (must be a PowerShell window, not Git Bash)
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\db-tunnel.ps1
+   ```
+
+   **Git Bash / Linux / macOS**
+
+   ```bash
+   bash scripts/db-tunnel.sh
+   ```
+
+2. **Terminal 2** — test the connection, then run the app (see section 5).
+
+   Requires [OpenSSH client](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse) on Windows (`ssh` in your PATH).
+
+**Tunnel fails with “cannot listen to port 5432”?** Another program (often local PostgreSQL) is using that port. Use `SSH_TUNNEL_LOCAL_PORT` and the matching port in `DATABASE_URL` as shown in [`.env.example`](.env.example), then restart the tunnel. On Windows: `netstat -ano | findstr :5432`.
 
 ### 5. Run the app
 
-With the venv activated:
+With the venv activated (or call the venv Python directly on Windows):
 
 ```bash
+python scripts/test_db.py    # optional; verifies DATABASE_URL
 flask run --host=127.0.0.1 --port=5000
 # or
 python app.py
 ```
 
-### 6. Open http://127.0.0.1:5000 in your browser.
+Windows without activating the venv:
 
-## Pushing to GitHub
-
-- Initialize a repo and push as usual:
-
-```bash
-git init
-git add .
-git commit -m "Initial media catalog app"
-git remote add origin git@github.com:youruser/yourrepo.git
-git push -u origin main
+```powershell
+.\.venv\Scripts\python.exe scripts\test_db.py
+.\.venv\Scripts\python.exe -m flask run --host=127.0.0.1 --port=5000
 ```
 
-Do not commit `.venv/` or `.env`; both are listed in `.gitignore`.
+### 6. Open http://127.0.0.1:5000 in your browser.
+
