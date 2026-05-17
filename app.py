@@ -1,10 +1,11 @@
 import csv
 import io
+import json
 import base64
-import re
 from datetime import date
 
-import requests
+import anthropic
+from PIL import Image, ImageOps
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, url_for
 from flask_sqlalchemy import SQLAlchemy
@@ -199,118 +200,104 @@ def delete_item(item_id):
     return redirect(url_for("list_media"))
 
 
+def _auto_rotate_image(image_bytes):
+    """Apply EXIF-based auto-rotation so upside-down/sideways photos are corrected."""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img)
+        buf = io.BytesIO()
+        fmt = img.format or "JPEG"
+        img.save(buf, format=fmt)
+        return buf.getvalue()
+    except Exception:
+        return image_bytes
+
+
+_TITLE_PAGE_PROMPT = """
+You are analyzing an image of a book title page. Extract the fields below and
+return ONLY a valid JSON object — no prose, no markdown fences.
+
+Rules:
+- "title" is required; every title page has one.
+- "author" is usually present. If only editors are listed and no authors, use
+  the editors as the author value (comma-separated if more than one).
+- "publisher" is usually present. Publisher names often contain words like
+  Press, Publishing, Books, University, Inc., Ltd.
+- City names that appear on the page are publisher location info — put them in
+  "notes", not "publisher".
+- "year" and "isbn" are rare on title pages; only populate if clearly present.
+- NEVER populate genre or page_count — title pages never list these.
+- "notes" receives any other text that does not fit the above fields
+  (cities, edition info, marketing phrases, etc.).
+- Use null for any field not found. Use a plain string for all values.
+- "media_type" should be "book" for a title page; use "audio" or "video" only
+  if the image is clearly not a book.
+
+Return exactly this JSON shape:
+{
+  "media_type": "book",
+  "title": null,
+  "author": null,
+  "publisher": null,
+  "year": null,
+  "isbn": null,
+  "notes": null
+}
+"""
+
+
 def process_image_for_media(image_data):
-    """Process uploaded image with Vision API for media type and OCR."""
-    api_key = app.config.get("GOOGLE_VISION_API_KEY")
+    """Send image to Claude and return extracted book metadata as structured fields."""
+    api_key = app.config.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return {"error": "Google Vision API key not configured"}
+        return {"error": "Anthropic API key not configured"}
 
     try:
-        # Decode base64 image; accept either data URI or raw base64 content.
         encoded = image_data.split(",", maxsplit=1)[-1]
         image_bytes = base64.b64decode(encoded)
-
-        # Use requests to call Vision API directly with API key
-        vision_url = (
-            f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
-        )
-
+        image_bytes = _auto_rotate_image(image_bytes)
         image_content = base64.b64encode(image_bytes).decode("utf-8")
 
-        request_body = {
-            "requests": [
-                {
-                    "image": {"content": image_content},
-                    "features": [
-                        {"type": "OBJECT_LOCALIZATION", "maxResults": 10},
-                        {"type": "TEXT_DETECTION", "maxResults": 1},
-                    ],
-                }
-            ]
-        }
+        client = anthropic.Anthropic(api_key=api_key)
+        model = app.config.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+        message = client.messages.create(
+            model=model,
+            max_tokens=512,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_content,
+                        },
+                    },
+                    {"type": "text", "text": _TITLE_PAGE_PROMPT},
+                ],
+            }],
+        )
 
-        response = requests.post(vision_url, json=request_body, timeout=10)
-        if response.status_code != 200:
-            return {"error": f"Vision API error: {response.text}"}
-
-        data = response.json()
-        if "responses" not in data or not data["responses"]:
-            return {"error": "No response from Vision API"}
-
-        result = data["responses"][0]
-
-        # Extract objects
-        objects = result.get("localizedObjectAnnotations", [])
-        media_type = None
-        confidence = 0
-        for obj in objects:
-            name = obj["name"].lower()
-            score = obj["score"]
-            if "book" in name and score > confidence:
-                media_type = "book"
-                confidence = score
-            elif ("cd" in name or "disc" in name) and score > confidence:
-                media_type = "audio"  # Assume CD is audio
-                confidence = score
-            elif (
-                "dvd" in name or "bluray" in name or "video" in name
-            ) and score > confidence:
-                media_type = "video"
-                confidence = score
-
-        # Extract text
-        text_result = result.get("textAnnotations", [])
-        full_text = text_result[0]["description"] if text_result else ""
-
-        # Parse text for fields
-        extracted = parse_media_text(full_text)
+        raw = message.content[0].text.strip()
+        extracted = json.loads(raw)
 
         return {
-            "media_type": media_type or "book",
-            "title": extracted.get("title"),
-            "author": extracted.get("author"),
-            "year": extracted.get("year"),
-            "full_text": full_text,
-            "confidence": confidence,
+            "media_type": extracted.get("media_type") or "book",
+            "title":      extracted.get("title"),
+            "author":     extracted.get("author"),
+            "publisher":  extracted.get("publisher"),
+            "isbn":       extracted.get("isbn"),
+            "year":       extracted.get("year"),
+            "notes":      extracted.get("notes"),
+            "full_text":  "",
+            "confidence": 1.0,
         }
 
+    except json.JSONDecodeError as e:
+        return {"error": f"Could not parse Claude response as JSON: {e}"}
     except Exception as e:
-        return {"error": f"Vision API error: {str(e)}"}
-
-
-def parse_media_text(text):
-    """Parse OCR text to extract title, author, etc. using heuristics."""
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    extracted = {}
-
-    # Simple heuristics
-    for line in lines:
-        # Look for author patterns (common names, "by Author")
-        if (
-            "by " in line.lower()
-            or len(line.split()) == 2
-            and not any(char.isdigit() for char in line)
-        ):
-            if not extracted.get("author"):
-                extracted["author"] = line.replace("by ", "").strip()
-
-        # Look for year (4 digits)
-        years = re.findall(r"\b(?:19|20)\d{2}\b", line)
-        if years and not extracted.get("year"):
-            extracted["year"] = years[0]
-
-    # Assume first line or longest line is title
-    if lines:
-        potential_titles = [
-            line
-            for line in lines
-            if len(line) > 10
-            and not line.lower().startswith(("isbn", "by ", "copyright"))
-        ]
-        if potential_titles:
-            extracted["title"] = max(potential_titles, key=len)
-
-    return extracted
+        return {"error": f"Claude API error: {str(e)}"}
 
 
 @app.route("/scan")
@@ -333,12 +320,18 @@ def process_image():
             return ({"error": meta["error"]}, 500)
 
         # Normalize response fields to form-compatible keys
+        notes_val = meta.get("notes") or ""
+        full_text = meta.get("full_text", "")
+        if full_text:
+            notes_val = (notes_val + "\n\nOCR Text:\n" + full_text).strip()
         response = {
             "media_type": meta.get("media_type"),
             "title": meta.get("title"),
-            "year": meta.get("year"),
-            "notes": f"OCR Text: {meta.get('full_text', '')}",
             "author": meta.get("author"),
+            "publisher": meta.get("publisher"),
+            "isbn": meta.get("isbn"),
+            "year": meta.get("year"),
+            "notes": notes_val or None,
             "confidence": meta.get("confidence"),
         }
         return (response, 200)

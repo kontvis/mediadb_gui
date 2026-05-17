@@ -10,3 +10,8 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     GOOGLE_VISION_API_KEY = os.environ.get("GOOGLE_VISION_API_KEY")
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+    # Haiku 4.5: vision-capable, lowest-cost model on current Anthropic API.
+    ANTHROPIC_MODEL = os.environ.get(
+        "ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"
+    )
