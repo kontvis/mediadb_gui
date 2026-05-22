@@ -1,12 +1,22 @@
 import csv
 import io
+import json
 import base64
-import re
 from datetime import date
+from pathlib import Path
 
-import requests
+import anthropic
+from PIL import Image, ImageOps
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_sqlalchemy import SQLAlchemy
 
 from config import Config
@@ -107,6 +117,178 @@ def parse_optional_int(raw_value):
         return None
 
 
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
+
+
+def _get_bulk_photos_dir():
+    """Resolved path to the server-side photos folder for bulk import."""
+    configured = app.config.get("BULK_PHOTOS_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (Path(app.root_path) / "photos").resolve()
+
+
+def _is_image_filename(name):
+    if not name:
+        return False
+    return Path(name).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def _path_under_dir(path, root_dir):
+    """Return True if path resolves inside root_dir (blocks traversal)."""
+    try:
+        path.resolve().relative_to(root_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def process_image_bytes(image_bytes):
+    """Run title-page vision extraction on raw image bytes."""
+    encoded = base64.b64encode(image_bytes).decode("utf-8")
+    return process_image_for_media(f"data:image/jpeg;base64,{encoded}")
+
+
+def create_book_from_metadata(meta, source_name=None):
+    """Insert media_item + book_details from extracted metadata.
+
+    Returns (MediaItem, None) on success or (None, error_message) on failure.
+    """
+    title = (meta.get("title") or "").strip()
+    if not title:
+        return None, "Title is required"
+
+    notes = (meta.get("notes") or "").strip() or None
+    if source_name:
+        source_note = f"Source image: {source_name}"
+        notes = f"{notes}\n\n{source_note}" if notes else source_note
+
+    item = MediaItem(
+        title=title,
+        media_type="book",
+        year=parse_optional_int(meta.get("year")),
+        notes=notes,
+        date_added=date.today(),
+    )
+    db.session.add(item)
+    db.session.flush()
+
+    details = BookDetails(
+        id=item.id,
+        author=(meta.get("author") or "").strip() or None,
+        isbn=(meta.get("isbn") or "").strip() or None,
+        publisher=(meta.get("publisher") or "").strip() or None,
+    )
+    db.session.add(details)
+    return item, None
+
+
+def iter_image_files_from_upload(files):
+    """Yield (filename, bytes) from multipart uploads, sorted by name."""
+    entries = []
+    for f in files:
+        if not f or not f.filename or not _is_image_filename(f.filename):
+            continue
+        entries.append((f.filename, f.read()))
+    for name, data in sorted(entries, key=lambda x: x[0].lower()):
+        yield name, data
+
+
+def iter_image_files_from_dir(dir_path):
+    """Yield (filename, bytes) for images under dir_path (must be under photos root)."""
+    root = _get_bulk_photos_dir()
+    resolved_dir = Path(dir_path).resolve()
+    if not _path_under_dir(resolved_dir, root):
+        raise ValueError("Invalid photos directory")
+    if not resolved_dir.is_dir():
+        raise ValueError("Photos directory does not exist")
+
+    paths = []
+    for ext in IMAGE_EXTENSIONS:
+        paths.extend(resolved_dir.glob(f"*{ext}"))
+        paths.extend(resolved_dir.glob(f"*{ext.upper()}"))
+    for path in sorted(set(paths), key=lambda p: p.name.lower()):
+        if path.is_file() and _path_under_dir(path, root):
+            yield path.name, path.read_bytes()
+
+
+def bulk_import_images(file_iter):
+    """Process images sequentially; commit all successful adds at once."""
+    results = []
+    pending = False
+
+    for filename, image_bytes in file_iter:
+        meta = process_image_bytes(image_bytes)
+        if meta.get("error"):
+            results.append({
+                "filename": filename,
+                "status": "failed",
+                "title": None,
+                "item_id": None,
+                "error": meta["error"],
+            })
+            continue
+
+        media_type = (meta.get("media_type") or "book").lower()
+        if media_type != "book":
+            results.append({
+                "filename": filename,
+                "status": "skipped",
+                "title": meta.get("title"),
+                "item_id": None,
+                "error": f"Not a book title page (detected: {media_type})",
+            })
+            continue
+
+        title = (meta.get("title") or "").strip()
+        if not title:
+            results.append({
+                "filename": filename,
+                "status": "skipped",
+                "title": None,
+                "item_id": None,
+                "error": "No title extracted",
+            })
+            continue
+
+        item, err = create_book_from_metadata(meta, source_name=filename)
+        if err:
+            results.append({
+                "filename": filename,
+                "status": "failed",
+                "title": title,
+                "item_id": None,
+                "error": err,
+            })
+            continue
+
+        pending = True
+        results.append({
+            "filename": filename,
+            "status": "added",
+            "title": item.title,
+            "item_id": item.id,
+            "error": None,
+        })
+
+    if pending:
+        db.session.commit()
+    return results
+
+
+def _bulk_import_response(results):
+    """Build JSON summary for bulk import endpoints."""
+    added = sum(1 for r in results if r["status"] == "added")
+    skipped = sum(1 for r in results if r["status"] == "skipped")
+    failed = sum(1 for r in results if r["status"] == "failed")
+    return jsonify({
+        "results": results,
+        "added_count": added,
+        "skipped_count": skipped,
+        "failed_count": failed,
+    })
+
+
 # --- Routes ---
 @app.route("/")
 def index():
@@ -199,118 +381,145 @@ def delete_item(item_id):
     return redirect(url_for("list_media"))
 
 
-def process_image_for_media(image_data):
-    """Process uploaded image with Vision API for media type and OCR."""
-    api_key = app.config.get("GOOGLE_VISION_API_KEY")
-    if not api_key:
-        return {"error": "Google Vision API key not configured"}
+def _auto_rotate_image(image_bytes):
+    """Apply EXIF-based auto-rotation so upside-down/sideways photos are corrected."""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = ImageOps.exif_transpose(img)
+        buf = io.BytesIO()
+        fmt = img.format or "JPEG"
+        img.save(buf, format=fmt)
+        return buf.getvalue()
+    except Exception:
+        return image_bytes
+
+
+_TITLE_PAGE_PROMPT = """
+You are analyzing an image of a book title page. Extract the fields below and
+return ONLY a valid JSON object — no prose, no markdown fences.
+
+Rules:
+- "title" is required; every title page has one.
+- "author" is usually present. If only editors are listed and no authors, use
+  the editors as the author value (comma-separated if more than one).
+- "publisher" is usually present. Publisher names often contain words like
+  Press, Publishing, Books, University, Inc., Ltd.
+- City names that appear on the page are publisher location info — put them in
+  "notes", not "publisher".
+- "year" and "isbn" are rare on title pages; only populate if clearly present.
+- NEVER populate genre or page_count — title pages never list these.
+- "notes" receives any other text that does not fit the above fields
+  (cities, edition info, marketing phrases, etc.).
+- Use null for any field not found. Use a plain string for all values.
+- "media_type" should be "book" for a title page; use "audio" or "video" only
+  if the image is clearly not a book.
+
+Return exactly this JSON shape (your entire reply must be this object, nothing else):
+{
+  "media_type": "book",
+  "title": null,
+  "author": null,
+  "publisher": null,
+  "year": null,
+  "isbn": null,
+  "notes": null
+}
+"""
+
+
+def _claude_response_text(message):
+    """Collect text from all text blocks in a Claude message."""
+    parts = []
+    for block in message.content:
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+            parts.append(block.text)
+    return "\n".join(parts).strip()
+
+
+def _parse_claude_json(text):
+    """Parse JSON from Claude output, tolerating markdown fences or leading prose."""
+    if not text:
+        raise json.JSONDecodeError("empty response", text, 0)
+
+    candidate = text.strip()
+    if candidate.startswith("```"):
+        lines = candidate.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        candidate = "\n".join(lines).strip()
 
     try:
-        # Decode base64 image; accept either data URI or raw base64 content.
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start != -1 and end > start:
+            return json.loads(candidate[start : end + 1])
+        raise
+
+
+def process_image_for_media(image_data):
+    """Send image to Claude and return extracted book metadata as structured fields."""
+    api_key = app.config.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"error": "Anthropic API key not configured"}
+
+    raw = ""
+    try:
         encoded = image_data.split(",", maxsplit=1)[-1]
         image_bytes = base64.b64decode(encoded)
-
-        # Use requests to call Vision API directly with API key
-        vision_url = (
-            f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
-        )
-
+        image_bytes = _auto_rotate_image(image_bytes)
         image_content = base64.b64encode(image_bytes).decode("utf-8")
 
-        request_body = {
-            "requests": [
-                {
-                    "image": {"content": image_content},
-                    "features": [
-                        {"type": "OBJECT_LOCALIZATION", "maxResults": 10},
-                        {"type": "TEXT_DETECTION", "maxResults": 1},
-                    ],
-                }
-            ]
-        }
+        client = anthropic.Anthropic(api_key=api_key)
+        model = app.config.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+        message = client.messages.create(
+            model=model,
+            max_tokens=512,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_content,
+                        },
+                    },
+                    {"type": "text", "text": _TITLE_PAGE_PROMPT},
+                ],
+            }],
+        )
 
-        response = requests.post(vision_url, json=request_body, timeout=10)
-        if response.status_code != 200:
-            return {"error": f"Vision API error: {response.text}"}
+        raw = _claude_response_text(message)
+        extracted = _parse_claude_json(raw)
 
-        data = response.json()
-        if "responses" not in data or not data["responses"]:
-            return {"error": "No response from Vision API"}
-
-        result = data["responses"][0]
-
-        # Extract objects
-        objects = result.get("localizedObjectAnnotations", [])
-        media_type = None
-        confidence = 0
-        for obj in objects:
-            name = obj["name"].lower()
-            score = obj["score"]
-            if "book" in name and score > confidence:
-                media_type = "book"
-                confidence = score
-            elif ("cd" in name or "disc" in name) and score > confidence:
-                media_type = "audio"  # Assume CD is audio
-                confidence = score
-            elif (
-                "dvd" in name or "bluray" in name or "video" in name
-            ) and score > confidence:
-                media_type = "video"
-                confidence = score
-
-        # Extract text
-        text_result = result.get("textAnnotations", [])
-        full_text = text_result[0]["description"] if text_result else ""
-
-        # Parse text for fields
-        extracted = parse_media_text(full_text)
+        year = extracted.get("year")
+        if year is not None:
+            year = str(year)
 
         return {
-            "media_type": media_type or "book",
-            "title": extracted.get("title"),
-            "author": extracted.get("author"),
-            "year": extracted.get("year"),
-            "full_text": full_text,
-            "confidence": confidence,
+            "media_type": extracted.get("media_type") or "book",
+            "title":      extracted.get("title"),
+            "author":     extracted.get("author"),
+            "publisher":  extracted.get("publisher"),
+            "isbn":       extracted.get("isbn"),
+            "year":       year,
+            "notes":      extracted.get("notes"),
+            "full_text":  "",
+            "confidence": 1.0,
         }
 
+    except json.JSONDecodeError as e:
+        preview = raw[:200] if raw else "(empty)"
+        return {
+            "error": f"Could not parse Claude response as JSON: {e}. Response started with: {preview!r}"
+        }
     except Exception as e:
-        return {"error": f"Vision API error: {str(e)}"}
-
-
-def parse_media_text(text):
-    """Parse OCR text to extract title, author, etc. using heuristics."""
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    extracted = {}
-
-    # Simple heuristics
-    for line in lines:
-        # Look for author patterns (common names, "by Author")
-        if (
-            "by " in line.lower()
-            or len(line.split()) == 2
-            and not any(char.isdigit() for char in line)
-        ):
-            if not extracted.get("author"):
-                extracted["author"] = line.replace("by ", "").strip()
-
-        # Look for year (4 digits)
-        years = re.findall(r"\b(?:19|20)\d{2}\b", line)
-        if years and not extracted.get("year"):
-            extracted["year"] = years[0]
-
-    # Assume first line or longest line is title
-    if lines:
-        potential_titles = [
-            line
-            for line in lines
-            if len(line) > 10
-            and not line.lower().startswith(("isbn", "by ", "copyright"))
-        ]
-        if potential_titles:
-            extracted["title"] = max(potential_titles, key=len)
-
-    return extracted
+        return {"error": f"Claude API error: {str(e)}"}
 
 
 @app.route("/scan")
@@ -333,17 +542,93 @@ def process_image():
             return ({"error": meta["error"]}, 500)
 
         # Normalize response fields to form-compatible keys
+        notes_val = meta.get("notes") or ""
+        full_text = meta.get("full_text", "")
+        if full_text:
+            notes_val = (notes_val + "\n\nOCR Text:\n" + full_text).strip()
         response = {
             "media_type": meta.get("media_type"),
             "title": meta.get("title"),
-            "year": meta.get("year"),
-            "notes": f"OCR Text: {meta.get('full_text', '')}",
             "author": meta.get("author"),
+            "publisher": meta.get("publisher"),
+            "isbn": meta.get("isbn"),
+            "year": meta.get("year"),
+            "notes": notes_val or None,
             "confidence": meta.get("confidence"),
         }
         return (response, 200)
     except Exception as e:
         return ({"error": f"Processing error: {str(e)}"}, 500)
+
+
+@app.route("/bulk-import")
+def bulk_import_ui():
+    """Render bulk title-page import UI."""
+    photos_dir = _get_bulk_photos_dir()
+    return render_template(
+        "bulk_import.html",
+        photos_dir_exists=photos_dir.is_dir(),
+        photos_dir=str(photos_dir),
+        max_bulk_files=app.config.get("MAX_BULK_FILES", 100),
+    )
+
+
+@app.route("/bulk-import/process", methods=["POST"])
+def bulk_import_process():
+    """Process uploaded folder images and auto-save books."""
+    if not app.config.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "Anthropic API key not configured"}), 400
+
+    files = request.files.getlist("images")
+    if not files:
+        return jsonify({"error": "No images uploaded"}), 400
+
+    max_files = app.config.get("MAX_BULK_FILES", 100)
+    image_files = [f for f in files if f.filename and _is_image_filename(f.filename)]
+    if len(image_files) > max_files:
+        return jsonify({
+            "error": f"Too many images (max {max_files}). Select a smaller folder.",
+        }), 400
+
+    try:
+        results = bulk_import_images(iter_image_files_from_upload(image_files))
+        return _bulk_import_response(results)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Bulk import failed: {str(e)}"}), 500
+
+
+@app.route("/bulk-import/process-server", methods=["POST"])
+def bulk_import_process_server():
+    """Process all images in the configured server photos folder."""
+    if not app.config.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "Anthropic API key not configured"}), 400
+
+    photos_dir = _get_bulk_photos_dir()
+    if not photos_dir.is_dir():
+        return jsonify({"error": f"Photos folder not found: {photos_dir}"}), 400
+
+    try:
+        file_iter = iter_image_files_from_dir(photos_dir)
+        files_list = list(file_iter)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    if not files_list:
+        return jsonify({"error": "No image files found in photos folder"}), 400
+
+    max_files = app.config.get("MAX_BULK_FILES", 100)
+    if len(files_list) > max_files:
+        return jsonify({
+            "error": f"Too many images in folder (max {max_files}).",
+        }), 400
+
+    try:
+        results = bulk_import_images(iter(files_list))
+        return _bulk_import_response(results)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Bulk import failed: {str(e)}"}), 500
 
 
 # --- Add forms ---

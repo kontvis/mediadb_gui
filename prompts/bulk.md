@@ -1,0 +1,1 @@
+Add a new feature to this app that will allow the user to load a folder full of images of book title pages and load them all to the databse.  

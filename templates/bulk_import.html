@@ -1,0 +1,165 @@
+{% extends 'base.html' %}
+{% block content %}
+  <h2>Bulk Import Title Pages</h2>
+  <p>
+    Select a folder of book title-page photos. Each image is analyzed and saved as a book
+    when a title is found. Review the results below and use <strong>Edit</strong> to fix any entries.
+  </p>
+  <p class="text-muted small">
+    Requires <code>ANTHROPIC_API_KEY</code> in <code>.env</code>.
+    Processing is sequential (~a few seconds per image).
+    Maximum {{ max_bulk_files }} images per run.
+  </p>
+
+  <div class="mb-4">
+    <label class="form-label fw-semibold">Choose folder (browser)</label>
+    <input
+      type="file"
+      id="folderInput"
+      accept="image/*"
+      webkitdirectory
+      multiple
+      class="form-control form-control-lg"
+    >
+    <div class="form-text">Pick the folder containing your title-page images.</div>
+  </div>
+
+  <div class="mb-3 d-flex flex-wrap gap-2">
+    <button type="button" id="startBtn" class="btn btn-primary" disabled>
+      Start import
+    </button>
+    {% if photos_dir_exists %}
+      <button type="button" id="serverBtn" class="btn btn-outline-secondary">
+        Import from photos folder
+      </button>
+      <span class="align-self-center text-muted small">{{ photos_dir }}</span>
+    {% endif %}
+  </div>
+
+  <div id="status" class="mb-3" aria-live="polite"></div>
+
+  <div id="summary" class="alert alert-info d-none" role="status"></div>
+
+  <div id="resultsWrap" class="d-none">
+    <h4 class="mt-4">Results</h4>
+    <div class="table-responsive">
+      <table class="table table-sm table-striped" id="resultsTable">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Status</th>
+            <th>Title</th>
+            <th>Message</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const IMAGE_EXT = /\.(jpe?g|png|webp|gif|heic)$/i;
+    const folderInput = document.getElementById('folderInput');
+    const startBtn = document.getElementById('startBtn');
+    const serverBtn = document.getElementById('serverBtn');
+    const statusEl = document.getElementById('status');
+    const summaryEl = document.getElementById('summary');
+    const resultsWrap = document.getElementById('resultsWrap');
+    const resultsBody = document.getElementById('resultsBody');
+
+    function imageFilesFromInput() {
+      return Array.from(folderInput.files || []).filter(f => IMAGE_EXT.test(f.name));
+    }
+
+    folderInput.addEventListener('change', () => {
+      const n = imageFilesFromInput().length;
+      startBtn.disabled = n === 0;
+      statusEl.textContent = n ? `${n} image(s) selected.` : '';
+    });
+
+    function statusBadge(status) {
+      const map = { added: 'success', skipped: 'warning', failed: 'danger' };
+      const cls = map[status] || 'secondary';
+      return `<span class="badge bg-${cls}">${status}</span>`;
+    }
+
+    function renderResults(data) {
+      const { results, added_count, skipped_count, failed_count } = data;
+      summaryEl.classList.remove('d-none');
+      summaryEl.textContent =
+        `${added_count} added, ${skipped_count} skipped, ${failed_count} failed.`;
+
+      resultsBody.innerHTML = '';
+      for (const row of results) {
+        const tr = document.createElement('tr');
+        let actions = '';
+        if (row.status === 'added' && row.item_id) {
+          actions =
+            `<a class="btn btn-sm btn-outline-secondary me-1" href="/edit/book/${row.item_id}">Edit</a>` +
+            `<a class="btn btn-sm btn-outline-primary" href="/media/${row.item_id}">View</a>`;
+        }
+        tr.innerHTML =
+          `<td>${escapeHtml(row.filename)}</td>` +
+          `<td>${statusBadge(row.status)}</td>` +
+          `<td>${escapeHtml(row.title || '—')}</td>` +
+          `<td>${escapeHtml(row.error || '')}</td>` +
+          `<td>${actions}</td>`;
+        resultsBody.appendChild(tr);
+      }
+      resultsWrap.classList.remove('d-none');
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function setBusy(busy, message) {
+      startBtn.disabled = busy || imageFilesFromInput().length === 0;
+      if (serverBtn) serverBtn.disabled = busy;
+      folderInput.disabled = busy;
+      statusEl.textContent = message || '';
+    }
+
+    async function runImport(url, body) {
+      setBusy(true, 'Processing images… this may take a while.');
+      summaryEl.classList.add('d-none');
+      resultsWrap.classList.add('d-none');
+
+      try {
+        const opts = { method: 'POST' };
+        if (body) opts.body = body;
+        const res = await fetch(url, opts);
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          statusEl.textContent = 'Error: ' + (data.error || res.statusText);
+          return;
+        }
+        renderResults(data);
+        statusEl.textContent = 'Import complete.';
+      } catch (err) {
+        statusEl.textContent = 'Import failed: ' + err.message;
+      } finally {
+        setBusy(false, '');
+      }
+    }
+
+    startBtn.addEventListener('click', () => {
+      const files = imageFilesFromInput();
+      if (!files.length) return;
+      const fd = new FormData();
+      for (const f of files) {
+        fd.append('images', f);
+      }
+      runImport('/bulk-import/process', fd);
+    });
+
+    if (serverBtn) {
+      serverBtn.addEventListener('click', () => {
+        runImport('/bulk-import/process-server');
+      });
+    }
+  </script>
+{% endblock %}
