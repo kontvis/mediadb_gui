@@ -141,3 +141,15 @@ Windows without activating the venv:
 
 ### 6. Open http://127.0.0.1:5000 in your browser.
 
+### Bulk import (title-page photos)
+
+To add many books from photos of title pages:
+
+1. Set `ANTHROPIC_API_KEY` in `.env` (same key used by **Scan**).
+2. Either:
+   - Use **Bulk Import** in the nav, choose a folder in the browser, and click **Start import**, or
+   - Drop images into a `photos/` folder at the project root (gitignored), then click **Import from photos folder** on the Bulk Import page.
+3. After the run, review the results table and use **Edit** on any row that needs correction.
+
+Optional: set `BULK_PHOTOS_DIR` in `.env` to use a different server folder (see `.env.example`). `MAX_BULK_FILES` caps how many images are processed per run (default 100).
+

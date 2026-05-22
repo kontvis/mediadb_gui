@@ -3,11 +3,20 @@ import io
 import json
 import base64
 from datetime import date
+from pathlib import Path
 
 import anthropic
 from PIL import Image, ImageOps
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask_sqlalchemy import SQLAlchemy
 
 from config import Config
@@ -106,6 +115,178 @@ def parse_optional_int(raw_value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
+
+
+def _get_bulk_photos_dir():
+    """Resolved path to the server-side photos folder for bulk import."""
+    configured = app.config.get("BULK_PHOTOS_DIR")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (Path(app.root_path) / "photos").resolve()
+
+
+def _is_image_filename(name):
+    if not name:
+        return False
+    return Path(name).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def _path_under_dir(path, root_dir):
+    """Return True if path resolves inside root_dir (blocks traversal)."""
+    try:
+        path.resolve().relative_to(root_dir.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def process_image_bytes(image_bytes):
+    """Run title-page vision extraction on raw image bytes."""
+    encoded = base64.b64encode(image_bytes).decode("utf-8")
+    return process_image_for_media(f"data:image/jpeg;base64,{encoded}")
+
+
+def create_book_from_metadata(meta, source_name=None):
+    """Insert media_item + book_details from extracted metadata.
+
+    Returns (MediaItem, None) on success or (None, error_message) on failure.
+    """
+    title = (meta.get("title") or "").strip()
+    if not title:
+        return None, "Title is required"
+
+    notes = (meta.get("notes") or "").strip() or None
+    if source_name:
+        source_note = f"Source image: {source_name}"
+        notes = f"{notes}\n\n{source_note}" if notes else source_note
+
+    item = MediaItem(
+        title=title,
+        media_type="book",
+        year=parse_optional_int(meta.get("year")),
+        notes=notes,
+        date_added=date.today(),
+    )
+    db.session.add(item)
+    db.session.flush()
+
+    details = BookDetails(
+        id=item.id,
+        author=(meta.get("author") or "").strip() or None,
+        isbn=(meta.get("isbn") or "").strip() or None,
+        publisher=(meta.get("publisher") or "").strip() or None,
+    )
+    db.session.add(details)
+    return item, None
+
+
+def iter_image_files_from_upload(files):
+    """Yield (filename, bytes) from multipart uploads, sorted by name."""
+    entries = []
+    for f in files:
+        if not f or not f.filename or not _is_image_filename(f.filename):
+            continue
+        entries.append((f.filename, f.read()))
+    for name, data in sorted(entries, key=lambda x: x[0].lower()):
+        yield name, data
+
+
+def iter_image_files_from_dir(dir_path):
+    """Yield (filename, bytes) for images under dir_path (must be under photos root)."""
+    root = _get_bulk_photos_dir()
+    resolved_dir = Path(dir_path).resolve()
+    if not _path_under_dir(resolved_dir, root):
+        raise ValueError("Invalid photos directory")
+    if not resolved_dir.is_dir():
+        raise ValueError("Photos directory does not exist")
+
+    paths = []
+    for ext in IMAGE_EXTENSIONS:
+        paths.extend(resolved_dir.glob(f"*{ext}"))
+        paths.extend(resolved_dir.glob(f"*{ext.upper()}"))
+    for path in sorted(set(paths), key=lambda p: p.name.lower()):
+        if path.is_file() and _path_under_dir(path, root):
+            yield path.name, path.read_bytes()
+
+
+def bulk_import_images(file_iter):
+    """Process images sequentially; commit all successful adds at once."""
+    results = []
+    pending = False
+
+    for filename, image_bytes in file_iter:
+        meta = process_image_bytes(image_bytes)
+        if meta.get("error"):
+            results.append({
+                "filename": filename,
+                "status": "failed",
+                "title": None,
+                "item_id": None,
+                "error": meta["error"],
+            })
+            continue
+
+        media_type = (meta.get("media_type") or "book").lower()
+        if media_type != "book":
+            results.append({
+                "filename": filename,
+                "status": "skipped",
+                "title": meta.get("title"),
+                "item_id": None,
+                "error": f"Not a book title page (detected: {media_type})",
+            })
+            continue
+
+        title = (meta.get("title") or "").strip()
+        if not title:
+            results.append({
+                "filename": filename,
+                "status": "skipped",
+                "title": None,
+                "item_id": None,
+                "error": "No title extracted",
+            })
+            continue
+
+        item, err = create_book_from_metadata(meta, source_name=filename)
+        if err:
+            results.append({
+                "filename": filename,
+                "status": "failed",
+                "title": title,
+                "item_id": None,
+                "error": err,
+            })
+            continue
+
+        pending = True
+        results.append({
+            "filename": filename,
+            "status": "added",
+            "title": item.title,
+            "item_id": item.id,
+            "error": None,
+        })
+
+    if pending:
+        db.session.commit()
+    return results
+
+
+def _bulk_import_response(results):
+    """Build JSON summary for bulk import endpoints."""
+    added = sum(1 for r in results if r["status"] == "added")
+    skipped = sum(1 for r in results if r["status"] == "skipped")
+    failed = sum(1 for r in results if r["status"] == "failed")
+    return jsonify({
+        "results": results,
+        "added_count": added,
+        "skipped_count": skipped,
+        "failed_count": failed,
+    })
 
 
 # --- Routes ---
@@ -378,6 +559,76 @@ def process_image():
         return (response, 200)
     except Exception as e:
         return ({"error": f"Processing error: {str(e)}"}, 500)
+
+
+@app.route("/bulk-import")
+def bulk_import_ui():
+    """Render bulk title-page import UI."""
+    photos_dir = _get_bulk_photos_dir()
+    return render_template(
+        "bulk_import.html",
+        photos_dir_exists=photos_dir.is_dir(),
+        photos_dir=str(photos_dir),
+        max_bulk_files=app.config.get("MAX_BULK_FILES", 100),
+    )
+
+
+@app.route("/bulk-import/process", methods=["POST"])
+def bulk_import_process():
+    """Process uploaded folder images and auto-save books."""
+    if not app.config.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "Anthropic API key not configured"}), 400
+
+    files = request.files.getlist("images")
+    if not files:
+        return jsonify({"error": "No images uploaded"}), 400
+
+    max_files = app.config.get("MAX_BULK_FILES", 100)
+    image_files = [f for f in files if f.filename and _is_image_filename(f.filename)]
+    if len(image_files) > max_files:
+        return jsonify({
+            "error": f"Too many images (max {max_files}). Select a smaller folder.",
+        }), 400
+
+    try:
+        results = bulk_import_images(iter_image_files_from_upload(image_files))
+        return _bulk_import_response(results)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Bulk import failed: {str(e)}"}), 500
+
+
+@app.route("/bulk-import/process-server", methods=["POST"])
+def bulk_import_process_server():
+    """Process all images in the configured server photos folder."""
+    if not app.config.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "Anthropic API key not configured"}), 400
+
+    photos_dir = _get_bulk_photos_dir()
+    if not photos_dir.is_dir():
+        return jsonify({"error": f"Photos folder not found: {photos_dir}"}), 400
+
+    try:
+        file_iter = iter_image_files_from_dir(photos_dir)
+        files_list = list(file_iter)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    if not files_list:
+        return jsonify({"error": "No image files found in photos folder"}), 400
+
+    max_files = app.config.get("MAX_BULK_FILES", 100)
+    if len(files_list) > max_files:
+        return jsonify({
+            "error": f"Too many images in folder (max {max_files}).",
+        }), 400
+
+    try:
+        results = bulk_import_images(iter(files_list))
+        return _bulk_import_response(results)
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Bulk import failed: {str(e)}"}), 500
 
 
 # --- Add forms ---

@@ -15,3 +15,6 @@ class Config:
     ANTHROPIC_MODEL = os.environ.get(
         "ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"
     )
+    # Server-side bulk import folder (default: <project>/photos in app.py).
+    BULK_PHOTOS_DIR = os.environ.get("BULK_PHOTOS_DIR")
+    MAX_BULK_FILES = int(os.environ.get("MAX_BULK_FILES", "100"))
